@@ -11,6 +11,28 @@ services:
       - "5433:5432"
     volumes:
       - ask-my-channel-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U askmychannel -d ask_my_channel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: ask-my-channel-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/ask_my_channel
+      DB_USERNAME: askmychannel
+      DB_PASSWORD: askmychannel
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      PROFILE_PASSPHRASE: ${PROFILE_PASSPHRASE:-}
+    ports:
+      - "8080:8080"
 
 volumes:
   ask-my-channel-pgdata:

@@ -12,10 +12,12 @@ import com.karthik.askmychannel.repository.ChannelRepository;
 import com.karthik.askmychannel.repository.ChunkRepository;
 import com.karthik.askmychannel.repository.VideoRepository;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -54,7 +56,40 @@ public class ChatService {
         this.videoRepository = videoRepository;
     }
 
+    private static final String NOTHING_INGESTED_MESSAGE =
+            "This channel hasn't been ingested yet (or has no captioned videos), so I have nothing to answer from.";
+
     public ChatResponse ask(String channelId, String question, List<HistoryTurn> history) {
+        Optional<RetrievalResult> result = retrieveForChannel(channelId, question, history);
+        if (result.isEmpty()) {
+            return new ChatResponse(NOTHING_INGESTED_MESSAGE, List.of());
+        }
+        String answer = answerGenerationService.generate(result.get().prompt());
+        return new ChatResponse(answer, result.get().citations());
+    }
+
+    /**
+     * Streaming counterpart of ask() — same retrieval and prompt-building, but the answer
+     * arrives as a Flux of text chunks instead of one blocking String. Citations are still
+     * computed upfront (retrieval already ran), so the caller can send them before streaming
+     * starts rather than waiting for the full answer.
+     */
+    public ChatStreamResult askStreaming(String channelId, String question, List<HistoryTurn> history) {
+        Optional<RetrievalResult> result = retrieveForChannel(channelId, question, history);
+        if (result.isEmpty()) {
+            return new ChatStreamResult(List.of(), Flux.just(NOTHING_INGESTED_MESSAGE));
+        }
+        Flux<String> answerStream = answerGenerationService.generateStream(result.get().prompt());
+        return new ChatStreamResult(result.get().citations(), answerStream);
+    }
+
+    private record RetrievalResult(List<Citation> citations, String prompt) {
+    }
+
+    public record ChatStreamResult(List<Citation> citations, Flux<String> answerStream) {
+    }
+
+    private Optional<RetrievalResult> retrieveForChannel(String channelId, String question, List<HistoryTurn> history) {
         if (!channelRepository.existsById(channelId)) {
             throw new NoSuchElementException("Unknown channel: " + channelId);
         }
@@ -71,14 +106,12 @@ public class ChatService {
         List<Chunk> nearest = chunkRepository.findNearest(channelId, VectorFormat.toLiteral(queryVector), RETRIEVAL_K);
 
         if (nearest.isEmpty()) {
-            return new ChatResponse(
-                    "This channel hasn't been ingested yet (or has no captioned videos), so I have nothing to answer from.",
-                    List.of());
+            return Optional.empty();
         }
 
-        String answer = answerGenerationService.generate(buildPrompt(nearest, recentHistory, question));
+        String prompt = buildPrompt(nearest, recentHistory, question);
         List<Citation> citations = dedupeByVideo(nearest);
-        return new ChatResponse(answer, citations);
+        return Optional.of(new RetrievalResult(citations, prompt));
     }
 
     private String buildRetrievalQuery(List<HistoryTurn> recentHistory, String question) {

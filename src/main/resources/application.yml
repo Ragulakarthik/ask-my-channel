@@ -19,6 +19,18 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only health is exposed — a deployment platform's health check needs this; nothing
+        # else (env, metrics, beans, ...) should be reachable without auth, so nothing else
+        # is turned on.
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
 askmychannel:
   gemini:
     api-key: ${GEMINI_API_KEY:}

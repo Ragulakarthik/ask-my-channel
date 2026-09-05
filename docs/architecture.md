@@ -95,6 +95,29 @@ PostgreSQL + pgvector (Docker Compose)
     are never sent back to the browser — `GET /api/profile` returns only booleans
     (`hasGeminiKey`/`hasGroqKey`); the UI's "leave blank to keep the existing key" convention
     means a save never needs to round-trip a secret that's already stored.
+12. **Streamed answers via Server-Sent Events**, sharing the same retrieval path as the
+    non-streaming endpoint (`ChatService.retrieveForChannel` is used by both `ask()` and
+    `askStreaming()`). `GroqClient.generateStream()` consumes Groq's OpenAI-compatible
+    chat-completion-chunk SSE format directly via `WebClient.bodyToFlux(ServerSentEvent.class)`,
+    extracting only `delta.content` — reasoning models like `gpt-oss` stream a separate
+    `delta.reasoning` field first, which is simply never read. `POST /{handle}/chat/stream`
+    bridges the resulting `Flux<String>` to a Spring MVC `SseEmitter`: a `citations` event first
+    (retrieval already finished), then one `token` event per chunk, forcing
+    `MediaType.APPLICATION_JSON` on each token's data so multi-line/quote-containing text is
+    escaped safely. If Groq's stream errors — including immediately, before any token —
+    `AnswerGenerationService.generateStream()` falls back to Gemini's blocking `generate()`,
+    surfaced as a single `token` event rather than a real stream (a degraded but working answer
+    beats none). The frontend consumes this via `fetch()` + `response.body.getReader()` rather
+    than the native `EventSource` API, since `EventSource` only supports `GET` with no request
+    body — not viable here given the request needs a JSON body (question + history).
+13. **`docker-compose.yml` runs the whole stack**, not just Postgres — an `app` service builds
+    from the repo's own multi-stage `Dockerfile` (JRE + `yt-dlp` bundled) and depends on
+    `postgres` via a `pg_isready` healthcheck, so `docker compose up -d --build` is the entire
+    "clone this repo" story with zero local Java/Maven/`yt-dlp` install required. Running the app
+    locally against just the `postgres` service (`docker compose up -d postgres` +
+    `mvn spring-boot:run`) still works unchanged for active development. CI
+    (`.github/workflows/ci.yml`) runs `mvn -B verify` on every push/PR — no service containers
+    needed since all 21 tests are pure Mockito unit tests with no Spring context or real DB.
 
 ## Data model
 
@@ -121,9 +144,11 @@ PostgreSQL + pgvector (Docker Compose)
 
 - `ChunkingServiceTest` — pure unit tests, fabricated transcript segments, no network/DB
 - `ChatServiceTest` — Mockito-mocked `ChunkRepository`/`GeminiClient`/`AnswerGenerationService`/
-  `ChannelRepository`/`VideoRepository`, asserts prompt assembly and citation URL formatting
+  `ChannelRepository`/`VideoRepository`, asserts prompt assembly, citation URL formatting, and
+  (for `askStreaming()`) that citations are returned alongside a working `Flux` of answer chunks
 - `AnswerGenerationServiceTest` — Mockito-mocked `GroqClient`/`GeminiClient`, asserts the
-  fallback: Groq success skips Gemini entirely, Groq failure falls back to Gemini, both failing
-  raises one combined `LlmProviderException`
+  fallback for both `generate()` and `generateStream()`: Groq success skips Gemini entirely,
+  Groq failure falls back to Gemini (a full answer surfaced as one chunk for the streaming
+  case), both failing raises one combined `LlmProviderException`
 - `SettingsServiceTest` — DB value wins when present, falls back to the env-var default when
   blank/absent, and partial updates leave unspecified fields untouched

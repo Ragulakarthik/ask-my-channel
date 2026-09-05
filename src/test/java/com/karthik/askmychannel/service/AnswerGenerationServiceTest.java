@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Flux;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,5 +60,26 @@ class AnswerGenerationServiceTest {
                 .isInstanceOf(LlmProviderException.class)
                 .hasMessageContaining("Groq down")
                 .hasMessageContaining("Gemini quota exceeded");
+    }
+
+    @Test
+    void streamsTokensDirectlyFromGroqWhenItSucceeds() {
+        when(groqClient.generateStream("prompt")).thenReturn(Flux.just("Hel", "lo"));
+
+        List<String> tokens = service().generateStream("prompt").collectList().block();
+
+        assertThat(tokens).containsExactly("Hel", "lo");
+        verify(geminiClient, never()).generate("prompt");
+    }
+
+    @Test
+    void fallsBackToGeminisFullAnswerAsOneChunkWhenGroqStreamFails() {
+        when(groqClient.generateStream("prompt"))
+                .thenReturn(Flux.error(new GroqApiException("Groq streaming quota exceeded", null)));
+        when(geminiClient.generate("prompt")).thenReturn("full gemini answer");
+
+        List<String> tokens = service().generateStream("prompt").collectList().block();
+
+        assertThat(tokens).containsExactly("full gemini answer");
     }
 }

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -177,5 +178,35 @@ class ChatServiceTest {
         assertThat(prompt).contains("User: what comment repeated the most?");
         assertThat(prompt).contains("Assistant: \"Will make video on it\" appeared twice.");
         assertThat(prompt).contains("Question: give me top 5");
+    }
+
+    @Test
+    void streamingAskReturnsCitationsAlongsideTheAnswerStream() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+
+        Chunk chunk = new Chunk("chan-1", "vid-1", "some excerpt", 42.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f});
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of(chunk));
+        when(videoRepository.findById("vid-1")).thenReturn(Optional.of(new Video("vid-1", "chan-1", "Some Video", null, 600)));
+        when(answerGenerationService.generateStream(anyString())).thenReturn(Flux.just("Hel", "lo"));
+
+        ChatService.ChatStreamResult result = chatService().askStreaming("chan-1", "some question", List.of());
+
+        assertThat(result.citations()).hasSize(1);
+        assertThat(result.citations().get(0).url()).isEqualTo("https://youtu.be/vid-1?t=42s");
+        assertThat(result.answerStream().collectList().block()).containsExactly("Hel", "lo");
+    }
+
+    @Test
+    void streamingAskReturnsFallbackMessageAsSingleChunkWhenNoChunksFound() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of());
+
+        ChatService.ChatStreamResult result = chatService().askStreaming("chan-1", "some question", List.of());
+
+        assertThat(result.citations()).isEmpty();
+        assertThat(result.answerStream().collectList().block()).hasSize(1)
+                .first().asString().containsIgnoringCase("hasn't been ingested");
     }
 }

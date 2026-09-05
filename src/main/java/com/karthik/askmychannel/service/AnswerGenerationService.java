@@ -6,6 +6,7 @@ import com.karthik.askmychannel.client.LlmProviderException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 /**
  * Generates the final answer text, trying Groq first (fast, generous free-tier limits) and
@@ -41,5 +42,21 @@ public class AnswerGenerationService {
                         geminiFailure);
             }
         }
+    }
+
+    /**
+     * Streaming counterpart: tokens flow from Groq as they're generated. If Groq's stream
+     * errors (quota, outage, ...) at any point — including immediately, before any token
+     * arrived — falls back to Gemini's blocking generate(), surfaced to the caller as a single
+     * emitted chunk rather than a token-by-token stream. A degraded (non-streamed) fallback
+     * answer beats no answer at all.
+     */
+    public Flux<String> generateStream(String prompt) {
+        return groqClient.generateStream(prompt)
+                .onErrorResume(LlmProviderException.class, groqFailure -> {
+                    log.warn("Groq streaming failed, falling back to Gemini (non-streamed): {}",
+                            groqFailure.getMessage());
+                    return Flux.defer(() -> Flux.just(geminiClient.generate(prompt)));
+                });
     }
 }

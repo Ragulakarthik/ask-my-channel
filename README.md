@@ -1,5 +1,7 @@
 # Ask My Channel
 
+[![CI](https://github.com/Ragulakarthik/ask-my-channel/actions/workflows/ci.yml/badge.svg)](https://github.com/Ragulakarthik/ask-my-channel/actions/workflows/ci.yml)
+
 A RAG (Retrieval-Augmented Generation) chatbot over a YouTube creator's own content — video
 transcripts, descriptions, and viewer comments. Ask it a question and it answers grounded in
 what the channel actually said, citing the specific video and timestamp — not a generic LLM
@@ -24,17 +26,28 @@ Java 21 / Spring Boot 3, layered `controller → service → repository/client`.
 
 ## Prerequisites
 
-- Java 21, Maven
 - Docker + Docker Compose
-- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) installed and on your `PATH` (`pip install -U yt-dlp`)
 - A free Gemini API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) —
   the default project it creates is fine, no billing needed
 - A free Groq API key from [console.groq.com](https://console.groq.com) — no billing needed
 
+Running it outside Docker instead (see below) also needs Java 21, Maven, and
+[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) on your `PATH` (`pip install -U yt-dlp`).
+
 ## Run it
 
+The whole stack (app + Postgres) in one command — no local Java, Maven, or `yt-dlp` needed,
+they're all inside the image:
+
 ```bash
-docker compose up -d                  # starts Postgres with pgvector
+cp .env.example .env      # fill in your keys and a passphrase
+docker compose up -d --build
+```
+
+Or run the app locally against just a Postgres container, e.g. for active development:
+
+```bash
+docker compose up -d postgres
 
 export GEMINI_API_KEY=your-gemini-key-here      # or set later via the profile page
 export GROQ_API_KEY=your-groq-key-here          # or set later via the profile page
@@ -61,7 +74,8 @@ different channel. Leave it unset and those actions fail closed (rejected, not w
 | `POST` | `/api/channels/{handle}/ingest` | Passphrase-protected — start ingesting a channel (returns a `jobId` immediately) |
 | `GET` | `/api/channels/{handle}/status?jobId=` | Poll ingestion progress (public) |
 | `GET` | `/api/channels` | List ingested channels (public) |
-| `POST` | `/api/channels/{handle}/chat` | Ask a question — `{"question": "...", "history": [...]}` (public) |
+| `POST` | `/api/channels/{handle}/chat` | Ask a question, full answer at once — `{"question": "...", "history": [...]}` (public) |
+| `POST` | `/api/channels/{handle}/chat/stream` | Same, but the answer streams token-by-token over Server-Sent Events (public) |
 
 ## Testing
 
