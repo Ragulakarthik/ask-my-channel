@@ -4,6 +4,7 @@ import com.karthik.askmychannel.client.GeminiClient;
 import com.karthik.askmychannel.client.YoutubeClient;
 import com.karthik.askmychannel.config.AskMyChannelProperties;
 import com.karthik.askmychannel.entity.Chunk;
+import com.karthik.askmychannel.entity.ChunkSource;
 import com.karthik.askmychannel.entity.IngestJob;
 import com.karthik.askmychannel.entity.Video;
 import com.karthik.askmychannel.repository.ChunkRepository;
@@ -11,7 +12,7 @@ import com.karthik.askmychannel.repository.IngestJobRepository;
 import com.karthik.askmychannel.repository.VideoRepository;
 import com.karthik.askmychannel.service.model.ChannelVideos;
 import com.karthik.askmychannel.service.model.ChunkData;
-import com.karthik.askmychannel.service.model.TranscriptSegment;
+import com.karthik.askmychannel.service.model.VideoContent;
 import com.karthik.askmychannel.service.model.VideoMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -97,16 +98,27 @@ public class IngestionWorker {
             return;
         }
 
-        List<TranscriptSegment> segments = youtubeClient.fetchTranscript(video.videoId());
-        if (segments.isEmpty()) {
-            return;
+        VideoContent content = youtubeClient.fetchVideoContent(video.videoId());
+
+        if (!content.transcript().isEmpty()) {
+            List<ChunkData> chunks = chunkingService.chunk(content.transcript(), properties.ingestion().chunkWindowSeconds());
+            for (ChunkData chunkData : chunks) {
+                saveChunk(channelId, video.videoId(), chunkData.text(), chunkData.startSeconds(), ChunkSource.TRANSCRIPT);
+            }
         }
 
-        List<ChunkData> chunks = chunkingService.chunk(segments, properties.ingestion().chunkWindowSeconds());
-        for (ChunkData chunkData : chunks) {
-            float[] embedding = geminiClient.embed(chunkData.text());
-            chunkRepository.save(new Chunk(channelId, video.videoId(), chunkData.text(), chunkData.startSeconds(), embedding));
+        if (content.description() != null && !content.description().isBlank()) {
+            saveChunk(channelId, video.videoId(), content.description(), 0, ChunkSource.DESCRIPTION);
         }
+
+        for (String comment : content.topComments()) {
+            saveChunk(channelId, video.videoId(), comment, 0, ChunkSource.COMMENT);
+        }
+    }
+
+    private void saveChunk(String channelId, String videoId, String text, double startSeconds, ChunkSource source) {
+        float[] embedding = geminiClient.embed(text);
+        chunkRepository.save(new Chunk(channelId, videoId, text, startSeconds, source, embedding));
     }
 
     /**

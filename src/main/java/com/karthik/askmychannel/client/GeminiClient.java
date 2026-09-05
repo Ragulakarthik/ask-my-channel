@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.Exceptions;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
@@ -70,9 +71,17 @@ public class GeminiClient {
                     .retryWhen(Retry.backoff(3, Duration.ofSeconds(2))
                             .filter(GeminiClient::isRetryable))
                     .block();
-        } catch (WebClientResponseException e) {
-            throw new GeminiApiException("Gemini API call to " + path + " failed: " + e.getStatusCode()
-                    + " body=" + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            // When Retry.backoff exhausts its attempts, reactor throws its own
+            // RetryExhaustedException wrapping the real failure as the cause — catching only
+            // WebClientResponseException here let that leak out as a raw, unhandled 500 instead
+            // of a clean GeminiApiException. Unwrap it (and catch broadly) so nothing escapes.
+            Throwable actual = (Exceptions.isRetryExhausted(e) && e.getCause() != null) ? e.getCause() : e;
+            if (actual instanceof WebClientResponseException wcre) {
+                throw new GeminiApiException("Gemini API call to " + path + " failed: " + wcre.getStatusCode()
+                        + " body=" + wcre.getResponseBodyAsString(), wcre);
+            }
+            throw new GeminiApiException("Gemini API call to " + path + " failed: " + actual.getMessage(), actual);
         }
     }
 

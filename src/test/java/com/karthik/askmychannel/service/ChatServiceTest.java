@@ -3,6 +3,7 @@ package com.karthik.askmychannel.service;
 import com.karthik.askmychannel.client.GeminiClient;
 import com.karthik.askmychannel.dto.ChatResponse;
 import com.karthik.askmychannel.entity.Chunk;
+import com.karthik.askmychannel.entity.ChunkSource;
 import com.karthik.askmychannel.entity.Video;
 import com.karthik.askmychannel.repository.ChannelRepository;
 import com.karthik.askmychannel.repository.ChunkRepository;
@@ -32,6 +33,8 @@ class ChatServiceTest {
     @Mock
     private GeminiClient geminiClient;
     @Mock
+    private AnswerGenerationService answerGenerationService;
+    @Mock
     private ChunkRepository chunkRepository;
     @Mock
     private ChannelRepository channelRepository;
@@ -39,7 +42,7 @@ class ChatServiceTest {
     private VideoRepository videoRepository;
 
     private ChatService chatService() {
-        return new ChatService(geminiClient, chunkRepository, channelRepository, videoRepository);
+        return new ChatService(geminiClient, answerGenerationService, chunkRepository, channelRepository, videoRepository);
     }
 
     @Test
@@ -60,7 +63,7 @@ class ChatServiceTest {
 
         assertThat(response.citations()).isEmpty();
         assertThat(response.answer()).containsIgnoringCase("hasn't been ingested");
-        verify(geminiClient, never()).generate(anyString());
+        verify(answerGenerationService, never()).generate(anyString());
     }
 
     @Test
@@ -68,16 +71,16 @@ class ChatServiceTest {
         when(channelRepository.existsById("chan-1")).thenReturn(true);
         when(geminiClient.embed("how to prepare for interviews?")).thenReturn(new float[]{0.1f, 0.2f});
 
-        Chunk chunk = new Chunk("chan-1", "vid-1", "prepare DSA and mock interviews daily", 125.0, new float[]{0.1f, 0.2f});
+        Chunk chunk = new Chunk("chan-1", "vid-1", "prepare DSA and mock interviews daily", 125.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f});
         when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of(chunk));
         when(videoRepository.findById("vid-1")).thenReturn(Optional.of(
                 new Video("vid-1", "chan-1", "Interview Prep Roadmap", null, 600)));
-        when(geminiClient.generate(anyString())).thenReturn("Prepare DSA daily and do mock interviews.");
+        when(answerGenerationService.generate(anyString())).thenReturn("Prepare DSA daily and do mock interviews.");
 
         ChatResponse response = chatService().ask("chan-1", "how to prepare for interviews?");
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(geminiClient).generate(promptCaptor.capture());
+        verify(answerGenerationService).generate(promptCaptor.capture());
         assertThat(promptCaptor.getValue()).contains("prepare DSA and mock interviews daily");
         assertThat(promptCaptor.getValue()).contains("how to prepare for interviews?");
 
@@ -85,5 +88,54 @@ class ChatServiceTest {
         assertThat(response.citations()).hasSize(1);
         assertThat(response.citations().get(0).videoTitle()).isEqualTo("Interview Prep Roadmap");
         assertThat(response.citations().get(0).url()).isEqualTo("https://youtu.be/vid-1?t=125s");
+    }
+
+    @Test
+    void deduplicatesCitationsByVideoKeepingTheNearestTimestampPerVideo() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+
+        // Same video appears 3 times at different timestamps (nearest-first), plus one other video.
+        List<Chunk> nearest = List.of(
+                new Chunk("chan-1", "vid-1", "excerpt A", 0.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f}),
+                new Chunk("chan-1", "vid-1", "excerpt B", 274.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f}),
+                new Chunk("chan-1", "vid-2", "excerpt C", 10.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f}),
+                new Chunk("chan-1", "vid-1", "excerpt D", 500.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f})
+        );
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(nearest);
+        when(videoRepository.findById("vid-1")).thenReturn(Optional.of(new Video("vid-1", "chan-1", "Video One", null, 600)));
+        when(videoRepository.findById("vid-2")).thenReturn(Optional.of(new Video("vid-2", "chan-1", "Video Two", null, 600)));
+        when(answerGenerationService.generate(anyString())).thenReturn("answer");
+
+        ChatResponse response = chatService().ask("chan-1", "some question");
+
+        assertThat(response.citations()).hasSize(2);
+        assertThat(response.citations().get(0).videoTitle()).isEqualTo("Video One");
+        assertThat(response.citations().get(0).url()).isEqualTo("https://youtu.be/vid-1?t=0s");
+        assertThat(response.citations().get(1).videoTitle()).isEqualTo("Video Two");
+    }
+
+    @Test
+    void labelsExcerptsInThePromptByTheirSourceSoTheLlmCanWeighThemDifferently() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+
+        List<Chunk> nearest = List.of(
+                new Chunk("chan-1", "vid-1", "spoken in the video", 40.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f}),
+                new Chunk("chan-1", "vid-1", "written under the video", 0.0, ChunkSource.DESCRIPTION, new float[]{0.1f, 0.2f}),
+                new Chunk("chan-1", "vid-1", "said by a viewer", 0.0, ChunkSource.COMMENT, new float[]{0.1f, 0.2f})
+        );
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(nearest);
+        when(videoRepository.findById("vid-1")).thenReturn(Optional.of(new Video("vid-1", "chan-1", "Some Video", null, 600)));
+        when(answerGenerationService.generate(anyString())).thenReturn("answer");
+
+        chatService().ask("chan-1", "some question");
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(answerGenerationService).generate(promptCaptor.capture());
+        String prompt = promptCaptor.getValue();
+        assertThat(prompt).contains("[Video transcript] spoken in the video");
+        assertThat(prompt).contains("[Video description] written under the video");
+        assertThat(prompt).contains("[Viewer comment] said by a viewer");
     }
 }

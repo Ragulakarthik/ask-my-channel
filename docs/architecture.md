@@ -51,10 +51,16 @@ PostgreSQL + pgvector (Docker Compose)
    every supported language on request. The *original* track is identified by a URL-parameter
    heuristic — every translated language's caption URLs contain `tlang=`, the one real
    original-language track's URLs do not. Verified against real (Telugu-language) channel data.
-6. **Gemini via a plain Spring `WebClient`** hitting the REST API directly
-   (`gemini-embedding-001` truncated + L2-normalized to 768 dimensions; `gemini-flash-latest`
-   for generation) rather than Spring AI's abstraction, so the request/response mechanics stay
-   visible and interview-defensible.
+6. **Two providers via plain Spring `WebClient`s, not Spring AI's abstraction**, so the
+   request/response mechanics stay visible and interview-defensible: Gemini
+   (`gemini-embedding-001`, truncated + L2-normalized to 768 dimensions) for embeddings, and
+   `AnswerGenerationService` for generation — tries Groq (`openai/gpt-oss-120b`) first,
+   falling back to Gemini (`gemini-flash-latest`) if Groq throws. This came from hitting
+   Gemini's `generateContent` free-tier daily quota (just 20 requests for the `gemini-3.8-flash`
+   model behind the `-latest` alias) while `embedContent` sat on its own, unaffected quota —
+   two independent free-tier generation paths meaningfully improve uptime at zero cost.
+   `GeminiApiException`/`GroqApiException` both extend a common `LlmProviderException` so the
+   fallback (and `GlobalExceptionHandler`) can catch either uniformly.
 7. **Time-windowed chunking (~45s)** — `ChunkingService` is a pure function (no I/O), grouping
    consecutive transcript segments until the window is crossed. Each chunk carries
    `start_seconds` so a citation can link to `youtu.be/{videoId}?t={seconds}s`.
@@ -69,24 +75,40 @@ PostgreSQL + pgvector (Docker Compose)
    full URL with or without `/videos`. `HandleNormalizer` collapses all of these to one
    canonical `@handle` string used as the lookup key from chat requests back to the stable
    `channel_id`.
+10. **Three content sources per video, not just the transcript**: `YoutubeClient.fetchVideoContent()`
+    makes one `yt-dlp --dump-json --write-comments` call per video and pulls out the transcript,
+    the video description, and up to 15 top comments (sorted by like count) from that single
+    response — description/comments cost no extra request beyond what was already needed for
+    the caption-track URL. Each resulting `Chunk` is tagged with a `ChunkSource`
+    (`TRANSCRIPT`/`DESCRIPTION`/`COMMENT`); the chat prompt labels excerpts by source and is
+    instructed to treat comments as viewer opinions, not confirmed facts from the creator. If
+    the caption fetch itself fails (e.g. rate-limited), description/comments are still returned
+    rather than losing the video entirely.
 
 ## Data model
 
 - `channel(channel_id PK, handle, title, created_at)`
 - `video(video_id PK, channel_id FK, title, published_at, duration_seconds)`
 - `ingest_job(job_id PK, channel_id FK, status, videos_total, videos_done, error_message, created_at, updated_at)`
-- `chunk(id PK, channel_id FK, video_id FK, text, start_seconds, embedding vector(768))`,
-  indexed with `USING hnsw (embedding vector_cosine_ops)` plus a plain index on `channel_id`
+- `chunk(id PK, channel_id FK, video_id FK, text, start_seconds, source, embedding vector(768))`,
+  indexed with `USING hnsw (embedding vector_cosine_ops)` plus a plain index on `channel_id`.
+  `source` is `TRANSCRIPT` / `DESCRIPTION` / `COMMENT` (added in `V2__add_chunk_source.sql`,
+  defaulting existing rows to `TRANSCRIPT`)
 
 ## Error handling
 
 - Unknown channel/job → `404` (`NoSuchElementException` → `GlobalExceptionHandler`)
 - yt-dlp missing, a video with no captions, or a caption-fetch failure → `YoutubeClientException`
   → `502`; individual video failures are logged and skipped rather than failing the whole job
-- Gemini rate limiting → one retry with backoff inside `GeminiClient`, then `GeminiApiException` → `503`
+- Gemini/Groq rate limiting → retry with backoff inside each client, then a provider-specific
+  exception; generation additionally falls back Groq → Gemini before giving up → `503`
+  (`LlmProviderException`)
 
 ## Testing
 
 - `ChunkingServiceTest` — pure unit tests, fabricated transcript segments, no network/DB
-- `ChatServiceTest` — Mockito-mocked `ChunkRepository`/`GeminiClient`/`ChannelRepository`/`VideoRepository`,
-  asserts prompt assembly and citation URL formatting
+- `ChatServiceTest` — Mockito-mocked `ChunkRepository`/`GeminiClient`/`AnswerGenerationService`/
+  `ChannelRepository`/`VideoRepository`, asserts prompt assembly and citation URL formatting
+- `AnswerGenerationServiceTest` — Mockito-mocked `GroqClient`/`GeminiClient`, asserts the
+  fallback: Groq success skips Gemini entirely, Groq failure falls back to Gemini, both failing
+  raises one combined `LlmProviderException`

@@ -1,6 +1,6 @@
 package com.karthik.askmychannel.controller;
 
-import com.karthik.askmychannel.client.GeminiApiException;
+import com.karthik.askmychannel.client.LlmProviderException;
 import com.karthik.askmychannel.client.YoutubeClientException;
 import com.karthik.askmychannel.dto.ErrorResponse;
 import org.slf4j.Logger;
@@ -28,9 +28,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(new ErrorResponse(e.getMessage()));
     }
 
-    @ExceptionHandler(GeminiApiException.class)
-    public ResponseEntity<ErrorResponse> handleGeminiApi(GeminiApiException e) {
-        log.warn("Gemini API error", e);
+    @ExceptionHandler(LlmProviderException.class)
+    public ResponseEntity<ErrorResponse> handleLlmProvider(LlmProviderException e) {
+        log.warn("LLM provider error", e);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(new ErrorResponse("The AI provider is temporarily unavailable, please try again shortly."));
     }

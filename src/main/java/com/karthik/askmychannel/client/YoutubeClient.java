@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.karthik.askmychannel.config.AskMyChannelProperties;
 import com.karthik.askmychannel.service.model.ChannelVideos;
 import com.karthik.askmychannel.service.model.TranscriptSegment;
+import com.karthik.askmychannel.service.model.VideoContent;
 import com.karthik.askmychannel.service.model.VideoMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,18 +21,21 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Lists a channel's uploads and fetches per-video transcripts.
+ * Lists a channel's uploads and fetches per-video content (transcript, description, comments).
  * <p>
- * Video listing shells out to the yt-dlp binary (no YouTube Data API key required). Transcript
- * fetching also asks yt-dlp for a video's metadata (which includes pre-signed caption-track
- * URLs), then fetches the caption track directly over plain HTTP in the "json3" format —
- * avoiding yt-dlp's own subtitle-download path, which is prone to 429s from YouTube for this
- * use case, and avoiding VTT's roll-up/duplicate-cue text format.
+ * Video listing shells out to the yt-dlp binary (no YouTube Data API key required). Per-video
+ * fetching also asks yt-dlp for a video's metadata in one call (which includes the description,
+ * top comments, and pre-signed caption-track URLs), then fetches the caption track separately
+ * over plain HTTP in the "json3" format — avoiding yt-dlp's own subtitle-download path, which is
+ * prone to 429s from YouTube for this use case, and avoiding VTT's roll-up/duplicate-cue text
+ * format. If the caption fetch fails, description/comments are still returned rather than
+ * losing the whole video.
  */
 @Component
 public class YoutubeClient {
@@ -99,21 +103,52 @@ public class YoutubeClient {
         return new ChannelVideos(channelId, channelTitle, videos);
     }
 
-    public List<TranscriptSegment> fetchTranscript(String videoId) {
+    private static final int MAX_COMMENTS = 15;
+
+    public VideoContent fetchVideoContent(String videoId) {
         String videoUrl = "https://www.youtube.com/watch?v=" + videoId;
-        List<String> lines = runYtDlp(List.of("--skip-download", "--dump-json", videoUrl));
+        List<String> lines = runYtDlp(List.of(
+                "--skip-download", "--write-comments",
+                "--extractor-args", "youtube:max_comments=" + MAX_COMMENTS + ",comment_sort=top",
+                "--dump-json", videoUrl));
         JsonNode metadata = parseJsonLine(String.join("", lines));
         if (metadata == null) {
             throw new YoutubeClientException("yt-dlp returned no metadata for video " + videoId);
         }
 
+        String description = metadata.path("description").asText(null);
+        List<String> comments = extractTopComments(metadata);
+
+        List<TranscriptSegment> transcript = List.of();
         JsonNode captionUrl = findOriginalCaptionTrackUrl(metadata);
         if (captionUrl == null) {
-            log.info("No captions available for video {}, skipping", videoId);
-            return List.of();
+            log.info("No captions available for video {}", videoId);
+        } else {
+            try {
+                transcript = fetchJson3Transcript(captionUrl.asText());
+            } catch (YoutubeClientException e) {
+                log.warn("Transcript fetch failed for video {}, keeping description/comments only: {}",
+                        videoId, e.getMessage());
+            }
         }
 
-        return fetchJson3Transcript(captionUrl.asText());
+        return new VideoContent(transcript, description, comments);
+    }
+
+    /**
+     * Comments (including the creator's own replies) sorted by like count, most-liked first,
+     * capped at MAX_COMMENTS and stripped of trivially short/empty ones.
+     */
+    private List<String> extractTopComments(JsonNode metadata) {
+        List<JsonNode> comments = new ArrayList<>();
+        metadata.path("comments").forEach(comments::add);
+
+        return comments.stream()
+                .sorted(Comparator.comparingLong((JsonNode c) -> c.path("like_count").asLong(0)).reversed())
+                .map(c -> c.path("text").asText("").strip())
+                .filter(text -> text.length() > 15)
+                .limit(MAX_COMMENTS)
+                .toList();
     }
 
     private JsonNode findOriginalCaptionTrackUrl(JsonNode metadata) {

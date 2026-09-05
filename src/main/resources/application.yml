@@ -26,6 +26,10 @@ askmychannel:
     embedding-model: gemini-embedding-001
     embedding-dimensions: 768
     generation-model: gemini-flash-latest
+  groq:
+    api-key: ${GROQ_API_KEY:}
+    base-url: https://api.groq.com/openai/v1
+    model: openai/gpt-oss-120b
   youtube:
     yt-dlp-path: ${YT_DLP_PATH:yt-dlp}
   ingestion:

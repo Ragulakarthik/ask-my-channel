@@ -3,6 +3,8 @@ package com.karthik.askmychannel.entity;
 import com.karthik.askmychannel.entity.support.VectorType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -29,6 +31,10 @@ public class Chunk {
     @Column(name = "start_seconds", nullable = false)
     private double startSeconds;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", nullable = false)
+    private ChunkSource source;
+
     @Type(VectorType.class)
     @Column(name = "embedding", nullable = false, columnDefinition = "vector(768)")
     private float[] embedding;
@@ -37,11 +43,12 @@ public class Chunk {
         // JPA
     }
 
-    public Chunk(String channelId, String videoId, String text, double startSeconds, float[] embedding) {
+    public Chunk(String channelId, String videoId, String text, double startSeconds, ChunkSource source, float[] embedding) {
         this.channelId = channelId;
         this.videoId = videoId;
         this.text = text;
         this.startSeconds = startSeconds;
+        this.source = source;
         this.embedding = embedding;
     }
 
@@ -63,6 +70,10 @@ public class Chunk {
 
     public double getStartSeconds() {
         return startSeconds;
+    }
+
+    public ChunkSource getSource() {
+        return source;
     }
 
     public float[] getEmbedding() {

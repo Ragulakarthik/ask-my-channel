@@ -15,4 +15,12 @@ public class WebClientConfig {
                 .baseUrl(properties.gemini().baseUrl())
                 .build();
     }
+
+    @Bean
+    @Qualifier("groqWebClient")
+    public WebClient groqWebClient(AskMyChannelProperties properties) {
+        return WebClient.builder()
+                .baseUrl(properties.groq().baseUrl())
+                .build();
+    }
 }
