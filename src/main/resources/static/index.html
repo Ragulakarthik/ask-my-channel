@@ -192,6 +192,23 @@ body{
 .citation-chip:hover{border-color:var(--accent-2);color:var(--text);transform:translateY(-2px);box-shadow:0 6px 16px rgba(79,156,255,0.2);}
 .citation-chip svg{width:11px;height:11px;flex-shrink:0;color:var(--accent-2);}
 .citation-chip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.citation-tooltip-float{
+    position:fixed;z-index:10000;width:200px;aspect-ratio:16/9;
+    background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+    overflow:hidden;box-shadow:var(--shadow-soft);pointer-events:none;display:none;
+}
+.citation-tooltip-float img{width:100%;height:100%;object-fit:cover;display:block;}
+
+.msg-actions{display:flex;gap:0.4rem;margin-top:0.7rem;}
+.action-btn{
+    display:flex;align-items:center;gap:0.35rem;
+    background:none;border:1px solid var(--border);color:var(--text-faint);
+    border-radius:999px;padding:0.3rem 0.65rem;font-size:0.7rem;font-family:var(--font-body);
+    cursor:pointer;transition:all .15s ease;
+}
+.action-btn:hover{border-color:var(--border-strong);color:var(--text-dim);background:var(--surface-2);}
+.action-btn.copied{color:var(--success);border-color:var(--success);}
+.action-btn svg{width:12px;height:12px;}
 
 /* ---------- composer ---------- */
 .composer{flex-shrink:0;padding:0.9rem 0 1.1rem;}
@@ -217,6 +234,18 @@ body{
 .send-btn:active{transform:scale(0.92);}
 .send-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
 .send-btn svg{width:16px;height:16px;}
+.send-btn.stop-mode{background:var(--danger);}
+
+button.icon-link{cursor:pointer;font:inherit;}
+.new-chat-btn{
+    display:flex;align-items:center;gap:0.4rem;flex-shrink:0;white-space:nowrap;
+    background:var(--surface);border:1px solid var(--border);color:var(--text-dim);
+    border-radius:999px;padding:0.45rem 0.9rem 0.45rem 0.7rem;
+    font-size:0.78rem;font-weight:500;font-family:var(--font-body);
+    cursor:pointer;transition:all .18s ease;
+}
+.new-chat-btn:hover{border-color:var(--border-strong);color:var(--text);background:var(--surface-2);}
+.new-chat-btn svg{width:14px;height:14px;flex-shrink:0;}
 .chat-status{font-size:0.72rem;color:var(--danger);text-align:center;margin-top:0.5rem;min-height:1em;}
 
 /* ---------- cursor glow ---------- */
@@ -267,6 +296,10 @@ body{
                 <span class="status-dot" id="statusDot"></span>
                 <span class="channel-label" id="channelLabel">Loading…</span>
             </div>
+            <button class="new-chat-btn" id="newChatBtn" type="button" title="Start a new chat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                <span>New Chat</span>
+            </button>
             <a class="icon-link" href="profile.html" title="Profile settings">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </a>
@@ -308,9 +341,31 @@ const channelLabel = $('channelLabel'), statusDot = $('statusDot');
 const chatArea = $('chatArea'), chatLog = $('chatLog'), emptyState = $('emptyState'), suggestions = $('suggestions');
 const questionInput = $('questionInput'), askBtn = $('askBtn'), chatStatus = $('chatStatus');
 
-// Held only in page memory — a reload starts a brand-new session with no history, while
-// follow-up questions within the same page load stay in context (server holds no session state).
-let conversationHistory = [];
+// {question, answer, citations} per turn — the server itself holds no session state, this is
+// the entire chat session. Persisted to localStorage (per channel handle) so a reload restores
+// the same conversation instead of starting over; "New chat" clears it explicitly.
+let chatTurns = [];
+let isStreaming = false;
+let activeAbortController = null;
+
+function storageKey(){ return 'askmychannel:chat:' + (activeHandle || 'default'); }
+function saveChatState(){
+    try { localStorage.setItem(storageKey(), JSON.stringify(chatTurns)); } catch (e) { /* storage unavailable, ignore */ }
+}
+function loadChatState(){
+    try {
+        const raw = localStorage.getItem(storageKey());
+        if (!raw) return;
+        const turns = JSON.parse(raw);
+        if (!Array.isArray(turns) || turns.length === 0) return;
+        turns.forEach(t => {
+            appendUserMessage(t.question);
+            renderBotBubbleContent(appendBotRow(), t.answer, t.citations);
+        });
+        chatTurns = turns;
+        scrollToBottom();
+    } catch (e) { /* corrupted storage, ignore */ }
+}
 
 let activeHandle = null;
 function currentHandle(){ return activeHandle; }
@@ -325,6 +380,7 @@ async function initActiveChannel(){
             activeHandle = data.channelHandle;
             channelLabel.textContent = data.channelTitle || data.channelHandle;
             setStatusDot('ready');
+            loadChatState();
         } else {
             channelLabel.textContent = 'No channel configured';
             setStatusDot('error');
@@ -364,57 +420,205 @@ function appendBotThinking(){
     return row;
 }
 
-function fillBotAnswer(row, answer, citations){
-    const bubble = row.querySelector('.bubble');
+function appendBotRow(){
+    const row = document.createElement('div');
+    row.className = 'msg-row bot';
+    row.innerHTML = `<div class="avatar bot">AI</div><div class="bubble"></div>`;
+    chatLog.appendChild(row);
+    return row.querySelector('.bubble');
+}
+
+function renderBotBubbleContent(bubble, answer, citations){
     bubble.innerHTML = renderMarkdown(answer);
-    if (citations && citations.length > 0){
-        const wrap = document.createElement('div');
-        wrap.className = 'citations';
-        citations.forEach(c => {
-            const a = document.createElement('a');
-            a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; a.className = 'citation-chip';
-            a.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7-11-7z"/></svg><span></span>`;
-            a.querySelector('span').textContent = c.videoTitle;
-            wrap.appendChild(a);
-        });
-        bubble.appendChild(wrap);
+    appendCitations(bubble, citations);
+    appendMessageActions(bubble, answer);
+}
+
+function appendCitations(bubble, citations){
+    if (!citations || citations.length === 0) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'citations';
+    citations.forEach(c => {
+        const a = document.createElement('a');
+        a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; a.className = 'citation-chip';
+        const videoIdMatch = c.url.match(/youtu\.be\/([\w-]+)/);
+        if (videoIdMatch) a.dataset.thumb = `https://img.youtube.com/vi/${videoIdMatch[1]}/hqdefault.jpg`;
+        a.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7-11-7z"/></svg><span></span>`;
+        a.querySelector('span').textContent = c.videoTitle;
+        wrap.appendChild(a);
+    });
+    bubble.appendChild(wrap);
+}
+
+// Single shared tooltip element positioned via getBoundingClientRect on hover — avoids clipping
+// against the citations row's own horizontal-scroll overflow, which an absolutely-positioned
+// child tooltip would be clipped by. Size is fixed via CSS (200 x 112.5, 16:9) so position can
+// be computed immediately rather than waiting on the thumbnail image to load.
+const TOOLTIP_W = 200, TOOLTIP_H = 112;
+const citationTooltip = document.createElement('div');
+citationTooltip.className = 'citation-tooltip-float';
+document.body.appendChild(citationTooltip);
+
+function showCitationTooltip(chip){
+    const thumb = chip.dataset.thumb;
+    if (!thumb) return;
+    citationTooltip.innerHTML = `<img src="${thumb}" alt="">`;
+    citationTooltip.style.display = 'block';
+    const rect = chip.getBoundingClientRect();
+    let left = Math.max(8, Math.min(rect.left + rect.width / 2 - TOOLTIP_W / 2, window.innerWidth - TOOLTIP_W - 8));
+    let top = rect.top - TOOLTIP_H - 10;
+    if (top < 8) top = rect.bottom + 10;
+    citationTooltip.style.left = left + 'px';
+    citationTooltip.style.top = top + 'px';
+}
+function hideCitationTooltip(){ citationTooltip.style.display = 'none'; }
+
+chatLog.addEventListener('mouseover', e => {
+    const chip = e.target.closest('.citation-chip');
+    if (chip) showCitationTooltip(chip);
+});
+chatLog.addEventListener('mouseout', e => {
+    if (e.target.closest('.citation-chip')) hideCitationTooltip();
+});
+chatArea.addEventListener('scroll', hideCitationTooltip);
+
+function appendMessageActions(bubble, text){
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-actions';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'action-btn';
+    copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span>`;
+    copyBtn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            const span = copyBtn.querySelector('span');
+            span.textContent = 'Copied!';
+            copyBtn.classList.add('copied');
+            setTimeout(() => { span.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 1500);
+        } catch (e) { /* clipboard unavailable, ignore */ }
+    });
+    wrap.appendChild(copyBtn);
+    bubble.appendChild(wrap);
+}
+
+function setComposerStreaming(streaming){
+    isStreaming = streaming;
+    askBtn.classList.toggle('stop-mode', streaming);
+    askBtn.title = streaming ? 'Stop generating' : 'Send';
+    askBtn.innerHTML = streaming
+        ? `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`
+        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
+}
+
+// Parses one or more complete "event: x\ndata: y\n\n" SSE frames out of the front of buf,
+// returning the leftover partial frame (if any) so the caller can keep accumulating it.
+function consumeSseFrames(buf, onEvent){
+    let boundary;
+    while ((boundary = buf.indexOf('\n\n')) !== -1) {
+        const frame = buf.slice(0, boundary);
+        buf = buf.slice(boundary + 2);
+        let eventName = 'message';
+        const dataLines = [];
+        for (const line of frame.split('\n')) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        if (dataLines.length > 0) onEvent(eventName, dataLines.join('\n'));
     }
-    scrollToBottom();
+    return buf;
 }
 
 async function ask(question){
     const handle = currentHandle();
-    if (!handle || !question) return;
+    if (!handle || !question || isStreaming) return;
 
     appendUserMessage(question);
     const thinkingRow = appendBotThinking();
-    askBtn.disabled = true;
+    const bubble = thinkingRow.querySelector('.bubble');
     chatStatus.textContent = '';
+    setComposerStreaming(true);
+
+    const abortController = new AbortController();
+    activeAbortController = abortController;
+
+    let fullAnswer = '';
+    let citations = [];
+    let firstToken = true;
+    let aborted = false;
+    let errored = false;
 
     try {
-        const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/chat`, {
+        const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/chat/stream`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({question, history: conversationHistory})
+            body: JSON.stringify({question, history: chatTurns.map(({question, answer}) => ({question, answer}))}),
+            signal: abortController.signal
         });
         if (!res.ok){ const err = await res.json().catch(() => ({message: res.statusText})); throw new Error(err.message); }
-        const data = await res.json();
-        fillBotAnswer(thinkingRow, data.answer, data.citations);
-        conversationHistory.push({question, answer: data.answer});
-        setStatusDot('ready');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const {value, done} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            buffer = consumeSseFrames(buffer, (eventName, data) => {
+                if (eventName === 'citations') {
+                    citations = JSON.parse(data);
+                } else if (eventName === 'token') {
+                    if (firstToken) { firstToken = false; bubble.innerHTML = ''; }
+                    fullAnswer += JSON.parse(data);
+                    bubble.innerHTML = renderMarkdown(fullAnswer);
+                    scrollToBottom();
+                }
+            });
+        }
     } catch (e) {
-        thinkingRow.remove();
-        chatStatus.textContent = e.message;
+        if (e.name === 'AbortError') {
+            aborted = true;
+            if (firstToken) thinkingRow.remove();
+        } else {
+            errored = true;
+            if (firstToken) thinkingRow.remove();
+            chatStatus.textContent = e.message;
+        }
     } finally {
-        askBtn.disabled = false;
+        if (activeAbortController === abortController) activeAbortController = null;
+        setComposerStreaming(false);
     }
+
+    if (!errored && !firstToken) {
+        if (aborted) fullAnswer += '\n\n*(stopped)*';
+        renderBotBubbleContent(bubble, fullAnswer, citations);
+        chatTurns.push({question, answer: fullAnswer, citations});
+        saveChatState();
+        setStatusDot('ready');
+    }
+    scrollToBottom();
 }
 
 askBtn.addEventListener('click', () => {
+    if (isStreaming) {
+        if (activeAbortController) activeAbortController.abort();
+        return;
+    }
     const q = questionInput.value.trim();
     if (!q) return;
     questionInput.value = '';
     ask(q);
+});
+
+$('newChatBtn').addEventListener('click', () => {
+    if (isStreaming && activeAbortController) activeAbortController.abort();
+    chatTurns = [];
+    try { localStorage.removeItem(storageKey()); } catch (e) { /* storage unavailable, ignore */ }
+    chatLog.innerHTML = '';
+    chatLog.appendChild(emptyState);
+    emptyState.style.display = 'flex';
+    chatStatus.textContent = '';
 });
 questionInput.addEventListener('keydown', e => { if (e.key === 'Enter') askBtn.click(); });
 suggestions.addEventListener('click', e => {
