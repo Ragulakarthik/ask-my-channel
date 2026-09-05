@@ -84,6 +84,17 @@ PostgreSQL + pgvector (Docker Compose)
     instructed to treat comments as viewer opinions, not confirmed facts from the creator. If
     the caption fetch itself fails (e.g. rate-limited), description/comments are still returned
     rather than losing the video entirely.
+11. **Profile page for channel + API key configuration, backed by a single-row `app_settings`
+    table**, not env vars alone. `SettingsService` resolves each value as "DB row if set, else
+    the env-var-configured default" — an existing env-var-only deployment keeps working
+    untouched, while `/profile.html` lets a deployer override any of the three fields (channel
+    handle, Gemini key, Groq key) at runtime, taking effect on the very next request since
+    `GeminiClient`/`GroqClient` resolve the key per-call rather than caching it at construction.
+    Gated by a shared passphrase (`ProfileAuthService`, fails closed if unset) since the app has
+    no login system and this page can repoint a live instance at a different channel. API keys
+    are never sent back to the browser — `GET /api/profile` returns only booleans
+    (`hasGeminiKey`/`hasGroqKey`); the UI's "leave blank to keep the existing key" convention
+    means a save never needs to round-trip a secret that's already stored.
 
 ## Data model
 
@@ -94,6 +105,8 @@ PostgreSQL + pgvector (Docker Compose)
   indexed with `USING hnsw (embedding vector_cosine_ops)` plus a plain index on `channel_id`.
   `source` is `TRANSCRIPT` / `DESCRIPTION` / `COMMENT` (added in `V2__add_chunk_source.sql`,
   defaulting existing rows to `TRANSCRIPT`)
+- `app_settings(id PK fixed to 1, channel_handle, gemini_api_key, groq_api_key, updated_at)` —
+  single row enforced via a `CHECK (id = 1)` constraint (added in `V3__add_app_settings.sql`)
 
 ## Error handling
 
@@ -112,3 +125,5 @@ PostgreSQL + pgvector (Docker Compose)
 - `AnswerGenerationServiceTest` — Mockito-mocked `GroqClient`/`GeminiClient`, asserts the
   fallback: Groq success skips Gemini entirely, Groq failure falls back to Gemini, both failing
   raises one combined `LlmProviderException`
+- `SettingsServiceTest` — DB value wins when present, falls back to the env-var default when
+  blank/absent, and partial updates leave unspecified fields untouched

@@ -3,7 +3,7 @@ package com.karthik.askmychannel.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "askmychannel")
-public record AskMyChannelProperties(Gemini gemini, Groq groq, Youtube youtube, Ingestion ingestion) {
+public record AskMyChannelProperties(Gemini gemini, Groq groq, Youtube youtube, Ingestion ingestion, Profile profile) {
 
     /**
      * Embeddings, plus a fallback generation model (see AnswerGenerationService) for when
@@ -29,5 +29,14 @@ public record AskMyChannelProperties(Gemini gemini, Groq groq, Youtube youtube, 
     }
 
     public record Ingestion(int chunkWindowSeconds, int maxThreadPoolSize) {
+    }
+
+    /**
+     * passphrase gates the profile page (channel/API-key configuration) and triggering
+     * ingestion — the app has no login system, so this is a deliberately minimal guard against
+     * a random visitor griefing a publicly-reachable instance. Left blank/unset, protected
+     * endpoints fail closed rather than defaulting to wide open.
+     */
+    public record Profile(String passphrase) {
     }
 }

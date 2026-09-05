@@ -2,6 +2,7 @@ package com.karthik.askmychannel.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.karthik.askmychannel.config.AskMyChannelProperties;
+import com.karthik.askmychannel.service.SettingsService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -22,10 +23,13 @@ public class GeminiClient {
 
     private final WebClient webClient;
     private final AskMyChannelProperties.Gemini properties;
+    private final SettingsService settingsService;
 
-    public GeminiClient(@Qualifier("geminiWebClient") WebClient webClient, AskMyChannelProperties properties) {
+    public GeminiClient(@Qualifier("geminiWebClient") WebClient webClient, AskMyChannelProperties properties,
+                         SettingsService settingsService) {
         this.webClient = webClient;
         this.properties = properties.gemini();
+        this.settingsService = settingsService;
     }
 
     /**
@@ -61,10 +65,16 @@ public class GeminiClient {
     }
 
     private JsonNode post(String path, Object body) {
+        String apiKey = settingsService.getEffectiveGeminiApiKey();
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new GeminiApiException(
+                    "No Gemini API key configured — set it on the profile page or via the GEMINI_API_KEY env var.",
+                    null);
+        }
         try {
             return webClient.post()
                     .uri(path)
-                    .header("X-goog-api-key", properties.apiKey())
+                    .header("X-goog-api-key", apiKey)
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(JsonNode.class)

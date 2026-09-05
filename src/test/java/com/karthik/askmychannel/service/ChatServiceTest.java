@@ -2,6 +2,7 @@ package com.karthik.askmychannel.service;
 
 import com.karthik.askmychannel.client.GeminiClient;
 import com.karthik.askmychannel.dto.ChatResponse;
+import com.karthik.askmychannel.dto.HistoryTurn;
 import com.karthik.askmychannel.entity.Chunk;
 import com.karthik.askmychannel.entity.ChunkSource;
 import com.karthik.askmychannel.entity.Video;
@@ -49,7 +50,7 @@ class ChatServiceTest {
     void throwsWhenChannelUnknown() {
         when(channelRepository.existsById("missing-channel")).thenReturn(false);
 
-        assertThatThrownBy(() -> chatService().ask("missing-channel", "what is DSA?"))
+        assertThatThrownBy(() -> chatService().ask("missing-channel", "what is DSA?", List.of()))
                 .isInstanceOf(NoSuchElementException.class);
     }
 
@@ -59,7 +60,7 @@ class ChatServiceTest {
         when(geminiClient.embed("what is DSA?")).thenReturn(new float[]{0.1f, 0.2f});
         when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of());
 
-        ChatResponse response = chatService().ask("chan-1", "what is DSA?");
+        ChatResponse response = chatService().ask("chan-1", "what is DSA?", List.of());
 
         assertThat(response.citations()).isEmpty();
         assertThat(response.answer()).containsIgnoringCase("hasn't been ingested");
@@ -77,7 +78,7 @@ class ChatServiceTest {
                 new Video("vid-1", "chan-1", "Interview Prep Roadmap", null, 600)));
         when(answerGenerationService.generate(anyString())).thenReturn("Prepare DSA daily and do mock interviews.");
 
-        ChatResponse response = chatService().ask("chan-1", "how to prepare for interviews?");
+        ChatResponse response = chatService().ask("chan-1", "how to prepare for interviews?", List.of());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(answerGenerationService).generate(promptCaptor.capture());
@@ -107,7 +108,7 @@ class ChatServiceTest {
         when(videoRepository.findById("vid-2")).thenReturn(Optional.of(new Video("vid-2", "chan-1", "Video Two", null, 600)));
         when(answerGenerationService.generate(anyString())).thenReturn("answer");
 
-        ChatResponse response = chatService().ask("chan-1", "some question");
+        ChatResponse response = chatService().ask("chan-1", "some question", List.of());
 
         assertThat(response.citations()).hasSize(2);
         assertThat(response.citations().get(0).videoTitle()).isEqualTo("Video One");
@@ -129,7 +130,7 @@ class ChatServiceTest {
         when(videoRepository.findById("vid-1")).thenReturn(Optional.of(new Video("vid-1", "chan-1", "Some Video", null, 600)));
         when(answerGenerationService.generate(anyString())).thenReturn("answer");
 
-        chatService().ask("chan-1", "some question");
+        chatService().ask("chan-1", "some question", List.of());
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(answerGenerationService).generate(promptCaptor.capture());
@@ -137,5 +138,44 @@ class ChatServiceTest {
         assertThat(prompt).contains("[Video transcript] spoken in the video");
         assertThat(prompt).contains("[Video description] written under the video");
         assertThat(prompt).contains("[Viewer comment] said by a viewer");
+    }
+
+    @Test
+    void foldsRecentHistoryIntoTheRetrievalQuerySoBareFollowUpsCanStillMatch() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of());
+
+        List<HistoryTurn> history = List.of(
+                new HistoryTurn("what comment repeated the most?", "\"Will make video on it\" appeared twice."));
+
+        chatService().ask("chan-1", "give me top 5", history);
+
+        // The bare follow-up alone has almost no retrieval signal — the prior question must be
+        // folded into what actually gets embedded for the pgvector search.
+        verify(geminiClient).embed("what comment repeated the most? give me top 5");
+    }
+
+    @Test
+    void includesRecentConversationHistoryInTheGenerationPromptForFollowUps() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+
+        Chunk chunk = new Chunk("chan-1", "vid-1", "some excerpt", 0.0, ChunkSource.COMMENT, new float[]{0.1f, 0.2f});
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of(chunk));
+        when(videoRepository.findById("vid-1")).thenReturn(Optional.of(new Video("vid-1", "chan-1", "Some Video", null, 600)));
+        when(answerGenerationService.generate(anyString())).thenReturn("answer");
+
+        List<HistoryTurn> history = List.of(
+                new HistoryTurn("what comment repeated the most?", "\"Will make video on it\" appeared twice."));
+
+        chatService().ask("chan-1", "give me top 5", history);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(answerGenerationService).generate(promptCaptor.capture());
+        String prompt = promptCaptor.getValue();
+        assertThat(prompt).contains("User: what comment repeated the most?");
+        assertThat(prompt).contains("Assistant: \"Will make video on it\" appeared twice.");
+        assertThat(prompt).contains("Question: give me top 5");
     }
 }

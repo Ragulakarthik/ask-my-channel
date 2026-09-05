@@ -2,6 +2,7 @@ package com.karthik.askmychannel.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.karthik.askmychannel.config.AskMyChannelProperties;
+import com.karthik.askmychannel.service.SettingsService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -22,10 +23,13 @@ public class GroqClient {
 
     private final WebClient webClient;
     private final AskMyChannelProperties.Groq properties;
+    private final SettingsService settingsService;
 
-    public GroqClient(@Qualifier("groqWebClient") WebClient webClient, AskMyChannelProperties properties) {
+    public GroqClient(@Qualifier("groqWebClient") WebClient webClient, AskMyChannelProperties properties,
+                       SettingsService settingsService) {
         this.webClient = webClient;
         this.properties = properties.groq();
+        this.settingsService = settingsService;
     }
 
     public String generate(String prompt) {
@@ -38,10 +42,16 @@ public class GroqClient {
     }
 
     private JsonNode post(String path, Object body) {
+        String apiKey = settingsService.getEffectiveGroqApiKey();
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new GroqApiException(
+                    "No Groq API key configured — set it on the profile page or via the GROQ_API_KEY env var.",
+                    null);
+        }
         try {
             return webClient.post()
                     .uri(path)
-                    .header("Authorization", "Bearer " + properties.apiKey())
+                    .header("Authorization", "Bearer " + apiKey)
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(JsonNode.class)

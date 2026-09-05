@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask My Channel — Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+    --bg:#08080d;
+    --bg-elevated:#0e0e16;
+    --surface:rgba(255,255,255,0.045);
+    --surface-2:rgba(255,255,255,0.07);
+    --border:rgba(255,255,255,0.09);
+    --border-strong:rgba(255,255,255,0.16);
+    --text:#edeef5;
+    --text-dim:#9a9db0;
+    --text-faint:#666a80;
+    --accent-1:#8b7bfb;
+    --accent-2:#4f9cff;
+    --accent-grad:linear-gradient(135deg,var(--accent-1),var(--accent-2));
+    --success:#3ddc97;
+    --danger:#ff6b6b;
+    --radius-lg:22px;
+    --radius-md:14px;
+    --radius-sm:10px;
+    --shadow-soft:0 10px 40px rgba(0,0,0,0.45);
+    --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    --font-display:'Space Grotesk','Inter',sans-serif;
+}
+*{box-sizing:border-box;}
+body{
+    margin:0;min-height:100vh;
+    font-family:var(--font-body);color:var(--text);
+    background:
+        radial-gradient(1100px 600px at 15% -10%, rgba(139,123,251,0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(79,156,255,0.12), transparent 55%),
+        var(--bg);
+    background-attachment:fixed;
+    display:flex;align-items:flex-start;justify-content:center;
+    padding:2.5rem 1.25rem;
+}
+.card{
+    width:100%;max-width:440px;
+    background:var(--bg-elevated);border:1px solid var(--border);
+    border-radius:var(--radius-lg);padding:1.6rem;
+    box-shadow:var(--shadow-soft);
+    animation:fadeUp .35s ease both;
+}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+.brand{display:flex;align-items:center;gap:0.7rem;margin-bottom:1.4rem;}
+.brand-icon{
+    width:36px;height:36px;border-radius:10px;background:var(--accent-grad);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+    box-shadow:0 4px 18px rgba(124,111,238,0.45);
+}
+.brand-icon svg{width:18px;height:18px;}
+.brand-title{font-family:var(--font-display);font-weight:700;font-size:1rem;}
+.brand-sub{font-size:0.72rem;color:var(--text-faint);margin-top:1px;}
+.back-link{margin-left:auto;color:var(--text-dim);font-size:0.78rem;text-decoration:none;border:1px solid var(--border);border-radius:999px;padding:0.35rem 0.8rem;transition:all .15s ease;}
+.back-link:hover{color:var(--text);border-color:var(--border-strong);background:var(--surface-2);}
+
+label{display:block;font-size:0.78rem;color:var(--text-dim);margin:0.9rem 0 0.4rem;font-weight:500;}
+label:first-of-type{margin-top:0;}
+input{
+    width:100%;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius-sm);color:var(--text);padding:0.6rem 0.85rem;
+    font-family:var(--font-body);font-size:0.88rem;outline:none;
+    transition:border-color .2s ease, box-shadow .2s ease;
+}
+input:focus{border-color:var(--accent-2);box-shadow:0 0 0 3px rgba(79,156,255,0.18);}
+input::placeholder{color:var(--text-faint);}
+.hint{font-size:0.72rem;color:var(--text-faint);margin-top:0.3rem;}
+.btn{
+    width:100%;margin-top:1.2rem;
+    background:var(--accent-grad);color:#fff;border:none;border-radius:var(--radius-sm);
+    padding:0.7rem;font-family:var(--font-body);font-weight:600;font-size:0.88rem;
+    cursor:pointer;transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+.btn:hover{box-shadow:0 6px 20px rgba(124,111,238,0.4);}
+.btn:active{transform:scale(0.98);}
+.btn:disabled{opacity:0.5;cursor:not-allowed;}
+.btn-secondary{background:var(--surface-2);border:1px solid var(--border);box-shadow:none;}
+.btn-secondary:hover{box-shadow:none;border-color:var(--border-strong);}
+.status{font-size:0.78rem;text-align:center;margin-top:0.8rem;min-height:1.1em;}
+.status.error{color:var(--danger);}
+.status.success{color:var(--success);}
+.divider{border:none;border-top:1px solid var(--border);margin:1.5rem 0;}
+.section-title{font-family:var(--font-display);font-size:0.85rem;font-weight:700;margin-bottom:0.3rem;}
+.progress-track{
+    height:3px;border-radius:3px;overflow:hidden;background:var(--surface);
+    margin-top:0.9rem;opacity:0;transition:opacity .3s ease;
+}
+.progress-track.active{opacity:1;}
+.progress-fill{height:100%;width:0%;background:var(--accent-grad);transition:width .5s cubic-bezier(.4,0,.2,1);}
+[hidden]{display:none!important;}
+</style>
+</head>
+<body>
+
+<div class="card" id="gateCard">
+    <div class="brand">
+        <div class="brand-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7-11-7z" fill="white"/></svg></div>
+        <div>
+            <div class="brand-title">Profile</div>
+            <div class="brand-sub">Deployer-only settings</div>
+        </div>
+        <a class="back-link" href="index.html">← Chat</a>
+    </div>
+    <label for="passphraseInput">Passphrase</label>
+    <input id="passphraseInput" type="password" placeholder="Enter the profile passphrase">
+    <button class="btn" id="unlockBtn">Unlock</button>
+    <div class="status" id="gateStatus"></div>
+</div>
+
+<div class="card" id="settingsCard" hidden>
+    <div class="brand">
+        <div class="brand-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7-11-7z" fill="white"/></svg></div>
+        <div>
+            <div class="brand-title">Profile</div>
+            <div class="brand-sub">Deployer-only settings</div>
+        </div>
+        <a class="back-link" href="index.html">← Chat</a>
+    </div>
+
+    <div class="section-title">Channel &amp; API keys</div>
+    <label for="handleInput">YouTube channel handle or URL</label>
+    <input id="handleInput" type="text" placeholder="@yourhandle or https://www.youtube.com/@yourhandle">
+
+    <label for="geminiInput">Gemini API key</label>
+    <input id="geminiInput" type="password" placeholder="">
+    <div class="hint" id="geminiHint">Get one free at aistudio.google.com/apikey</div>
+
+    <label for="groqInput">Groq API key</label>
+    <input id="groqInput" type="password" placeholder="">
+    <div class="hint" id="groqHint">Get one free at console.groq.com</div>
+
+    <button class="btn" id="saveBtn">Save settings</button>
+    <div class="status" id="saveStatus"></div>
+
+    <hr class="divider">
+
+    <div class="section-title">Ingestion</div>
+    <div class="hint" style="margin-bottom:0.8rem;">Pulls transcripts, descriptions, and comments for the channel above. Safe to re-run — already-ingested videos are skipped.</div>
+    <button class="btn btn-secondary" id="ingestBtn">Ingest / re-ingest channel</button>
+    <div class="progress-track" id="progressTrack"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="status" id="ingestStatus"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const gateCard = $('gateCard'), settingsCard = $('settingsCard');
+const passphraseInput = $('passphraseInput'), unlockBtn = $('unlockBtn'), gateStatus = $('gateStatus');
+const handleInput = $('handleInput'), geminiInput = $('geminiInput'), groqInput = $('groqInput');
+const geminiHint = $('geminiHint'), groqHint = $('groqHint');
+const saveBtn = $('saveBtn'), saveStatus = $('saveStatus');
+const ingestBtn = $('ingestBtn'), progressTrack = $('progressTrack'), progressFill = $('progressFill'), ingestStatus = $('ingestStatus');
+
+let passphrase = sessionStorage.getItem('profilePassphrase') || '';
+
+function authHeaders(extra){
+    return Object.assign({'X-Profile-Passphrase': passphrase}, extra || {});
+}
+
+async function loadProfile(){
+    const res = await fetch('/api/profile', {headers: authHeaders()});
+    if (!res.ok) throw new Error((await res.json().catch(() => ({message: res.statusText}))).message);
+    return res.json();
+}
+
+async function tryUnlock(candidatePassphrase){
+    passphrase = candidatePassphrase;
+    const data = await loadProfile();
+    sessionStorage.setItem('profilePassphrase', passphrase);
+    gateCard.hidden = true;
+    settingsCard.hidden = false;
+    handleInput.value = data.channelHandle || '';
+    geminiHint.textContent = data.hasGeminiKey
+        ? 'A key is already set — leave blank to keep it.'
+        : 'Get one free at aistudio.google.com/apikey';
+    groqHint.textContent = data.hasGroqKey
+        ? 'A key is already set — leave blank to keep it.'
+        : 'Get one free at console.groq.com';
+}
+
+(async function init(){
+    if (!passphrase) return;
+    try { await tryUnlock(passphrase); }
+    catch (e) { sessionStorage.removeItem('profilePassphrase'); passphrase = ''; }
+})();
+
+unlockBtn.addEventListener('click', async () => {
+    const value = passphraseInput.value.trim();
+    if (!value) return;
+    unlockBtn.disabled = true;
+    gateStatus.className = 'status';
+    gateStatus.textContent = 'Checking…';
+    try {
+        await tryUnlock(value);
+        gateStatus.textContent = '';
+    } catch (e) {
+        gateStatus.className = 'status error';
+        gateStatus.textContent = e.message;
+    } finally {
+        unlockBtn.disabled = false;
+    }
+});
+passphraseInput.addEventListener('keydown', e => { if (e.key === 'Enter') unlockBtn.click(); });
+
+saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveStatus.className = 'status';
+    saveStatus.textContent = 'Saving…';
+    try {
+        const res = await fetch('/api/profile', {
+            method: 'POST',
+            headers: authHeaders({'Content-Type': 'application/json'}),
+            body: JSON.stringify({
+                channelHandle: handleInput.value.trim(),
+                geminiApiKey: geminiInput.value.trim(),
+                groqApiKey: groqInput.value.trim()
+            })
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({message: res.statusText}))).message);
+        const data = await res.json();
+        geminiInput.value = '';
+        groqInput.value = '';
+        geminiHint.textContent = data.hasGeminiKey ? 'A key is already set — leave blank to keep it.' : 'Get one free at aistudio.google.com/apikey';
+        groqHint.textContent = data.hasGroqKey ? 'A key is already set — leave blank to keep it.' : 'Get one free at console.groq.com';
+        saveStatus.className = 'status success';
+        saveStatus.textContent = 'Saved.';
+    } catch (e) {
+        saveStatus.className = 'status error';
+        saveStatus.textContent = e.message;
+    } finally {
+        saveBtn.disabled = false;
+    }
+});
+
+async function pollIngestStatus(handle, jobId){
+    const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/status?jobId=${jobId}`);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({message: res.statusText}))).message);
+    return res.json();
+}
+
+ingestBtn.addEventListener('click', async () => {
+    const handle = handleInput.value.trim();
+    if (!handle) { ingestStatus.className = 'status error'; ingestStatus.textContent = 'Enter a channel handle first.'; return; }
+
+    ingestBtn.disabled = true;
+    progressTrack.classList.add('active');
+    progressFill.style.width = '2%';
+    ingestStatus.className = 'status';
+    ingestStatus.textContent = 'Starting ingestion…';
+
+    try {
+        const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/ingest`, {
+            method: 'POST', headers: authHeaders()
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({message: res.statusText}))).message);
+        const {jobId} = await res.json();
+
+        const tick = async () => {
+            const status = await pollIngestStatus(handle, jobId);
+            const pct = status.videosTotal ? Math.max(4, Math.round(100 * status.videosDone / status.videosTotal)) : 4;
+            progressFill.style.width = pct + '%';
+
+            if (status.status === 'DONE') {
+                ingestStatus.className = 'status success';
+                ingestStatus.textContent = `Done — ${status.videosDone}/${status.videosTotal} videos processed.`;
+                ingestBtn.disabled = false;
+                setTimeout(() => { progressTrack.classList.remove('active'); progressFill.style.width = '0%'; }, 1400);
+            } else if (status.status === 'FAILED') {
+                ingestStatus.className = 'status error';
+                ingestStatus.textContent = `Failed: ${status.errorMessage}`;
+                ingestBtn.disabled = false;
+                progressTrack.classList.remove('active');
+            } else {
+                ingestStatus.textContent = `${status.status}: ${status.videosDone}/${status.videosTotal} videos processed…`;
+                setTimeout(tick, 3000);
+            }
+        };
+        tick();
+    } catch (e) {
+        ingestStatus.className = 'status error';
+        ingestStatus.textContent = e.message;
+        ingestBtn.disabled = false;
+        progressTrack.classList.remove('active');
+    }
+});
+</script>
+</body>
+</html>

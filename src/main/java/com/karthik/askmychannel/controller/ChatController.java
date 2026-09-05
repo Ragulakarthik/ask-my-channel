@@ -32,6 +32,6 @@ public class ChatController {
         Channel channel = channelRepository.findByHandle(HandleNormalizer.normalize(handle))
                 .orElseThrow(() -> new NoSuchElementException(
                         "Channel '" + handle + "' hasn't been ingested yet — POST /api/channels/" + handle + "/ingest first."));
-        return chatService.ask(channel.getChannelId(), request.question());
+        return chatService.ask(channel.getChannelId(), request.question(), request.history());
     }
 }

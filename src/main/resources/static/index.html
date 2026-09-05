@@ -75,6 +75,7 @@ body{
 .brand-title{font-family:var(--font-display);font-weight:700;font-size:1.05rem;letter-spacing:-0.01em;line-height:1.2;}
 .brand-sub{font-size:0.72rem;color:var(--text-faint);margin-top:1px;}
 
+.header-right{display:flex;align-items:center;gap:0.6rem;}
 .channel-pill{
     display:flex;align-items:center;gap:0.5rem;
     background:var(--surface);
@@ -91,7 +92,16 @@ body{
     transition:background .3s ease, box-shadow .3s ease;
 }
 .status-dot.ready{background:var(--success);box-shadow:0 0 8px rgba(61,220,151,0.7);}
+.status-dot.error{background:var(--danger);}
 .channel-label{font-size:0.82rem;color:var(--text-dim);font-weight:500;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;}
+.icon-link{
+    display:flex;align-items:center;justify-content:center;
+    width:34px;height:34px;border-radius:50%;
+    border:1px solid var(--border);background:var(--surface);color:var(--text-dim);
+    text-decoration:none;transition:background .15s ease,color .15s ease,border-color .15s ease;
+}
+.icon-link:hover{background:var(--surface-2);color:var(--text);border-color:var(--border-strong);}
+.icon-link svg{width:16px;height:16px;}
 
 /* ---------- chat area ---------- */
 .chat-area{flex:1;overflow-y:auto;padding:0.5rem 0 1rem;scroll-behavior:smooth;}
@@ -252,9 +262,14 @@ body{
                 <div class="brand-sub">Grounded answers from this channel's content</div>
             </div>
         </div>
-        <div class="channel-pill" id="channelPill">
-            <span class="status-dot ready" id="statusDot"></span>
-            <span class="channel-label" id="channelLabel">@karthikragula6666</span>
+        <div class="header-right">
+            <div class="channel-pill" id="channelPill">
+                <span class="status-dot" id="statusDot"></span>
+                <span class="channel-label" id="channelLabel">Loading…</span>
+            </div>
+            <a class="icon-link" href="profile.html" title="Profile settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </a>
         </div>
     </header>
 
@@ -293,9 +308,36 @@ const channelLabel = $('channelLabel'), statusDot = $('statusDot');
 const chatArea = $('chatArea'), chatLog = $('chatLog'), emptyState = $('emptyState'), suggestions = $('suggestions');
 const questionInput = $('questionInput'), askBtn = $('askBtn'), chatStatus = $('chatStatus');
 
-function currentHandle(){ return channelLabel.textContent.trim(); }
+// Held only in page memory — a reload starts a brand-new session with no history, while
+// follow-up questions within the same page load stay in context (server holds no session state).
+let conversationHistory = [];
+
+let activeHandle = null;
+function currentHandle(){ return activeHandle; }
 function setStatusDot(state){ statusDot.className = 'status-dot' + (state ? ' ' + state : ''); }
 function scrollToBottom(){ requestAnimationFrame(() => { chatArea.scrollTop = chatArea.scrollHeight; }); }
+
+async function initActiveChannel(){
+    try {
+        const res = await fetch('/api/profile/active-channel');
+        const data = await res.json();
+        if (data.channelHandle) {
+            activeHandle = data.channelHandle;
+            channelLabel.textContent = data.channelTitle || data.channelHandle;
+            setStatusDot('ready');
+        } else {
+            channelLabel.textContent = 'No channel configured';
+            setStatusDot('error');
+            questionInput.placeholder = 'Ask the site owner to set up a channel on the profile page';
+            questionInput.disabled = true;
+            askBtn.disabled = true;
+        }
+    } catch (e) {
+        channelLabel.textContent = 'Connection error';
+        setStatusDot('error');
+    }
+}
+initActiveChannel();
 
 function renderMarkdown(text){
     const raw = marked.parse(text, {breaks: true});
@@ -353,11 +395,12 @@ async function ask(question){
         const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/chat`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({question})
+            body: JSON.stringify({question, history: conversationHistory})
         });
         if (!res.ok){ const err = await res.json().catch(() => ({message: res.statusText})); throw new Error(err.message); }
         const data = await res.json();
         fillBotAnswer(thinkingRow, data.answer, data.citations);
+        conversationHistory.push({question, answer: data.answer});
         setStatusDot('ready');
     } catch (e) {
         thinkingRow.remove();

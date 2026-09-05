@@ -35,6 +35,8 @@ askmychannel:
   ingestion:
     chunk-window-seconds: 45
     max-thread-pool-size: 2
+  profile:
+    passphrase: ${PROFILE_PASSPHRASE:}
 
 logging:
   level:

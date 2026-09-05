@@ -3,6 +3,7 @@ package com.karthik.askmychannel.service;
 import com.karthik.askmychannel.client.GeminiClient;
 import com.karthik.askmychannel.dto.ChatResponse;
 import com.karthik.askmychannel.dto.Citation;
+import com.karthik.askmychannel.dto.HistoryTurn;
 import com.karthik.askmychannel.entity.Chunk;
 import com.karthik.askmychannel.entity.ChunkSource;
 import com.karthik.askmychannel.entity.Video;
@@ -30,6 +31,11 @@ public class ChatService {
     private static final int RETRIEVAL_K = 8;
     private static final int MAX_CITATIONS = 5;
 
+    // The server keeps no session state — the client resends recent turns on every request, so
+    // a page reload naturally starts a fresh session with no history, without any server-side
+    // session store or expiry logic. Capped so a long-running chat doesn't blow up prompt size.
+    private static final int MAX_HISTORY_TURNS = 3;
+
     private final GeminiClient geminiClient;
     private final AnswerGenerationService answerGenerationService;
     private final ChunkRepository chunkRepository;
@@ -48,12 +54,20 @@ public class ChatService {
         this.videoRepository = videoRepository;
     }
 
-    public ChatResponse ask(String channelId, String question) {
+    public ChatResponse ask(String channelId, String question, List<HistoryTurn> history) {
         if (!channelRepository.existsById(channelId)) {
             throw new NoSuchElementException("Unknown channel: " + channelId);
         }
 
-        float[] queryVector = geminiClient.embed(question);
+        List<HistoryTurn> recentHistory = history.size() > MAX_HISTORY_TURNS
+                ? history.subList(history.size() - MAX_HISTORY_TURNS, history.size())
+                : history;
+
+        // A bare follow-up like "give me top 5" has almost no retrieval signal on its own —
+        // folding in recent questions gives pgvector something to actually match against,
+        // while the final answer is still grounded only in the retrieved excerpts + full
+        // conversation context built below, not in the retrieval query itself.
+        float[] queryVector = geminiClient.embed(buildRetrievalQuery(recentHistory, question));
         List<Chunk> nearest = chunkRepository.findNearest(channelId, VectorFormat.toLiteral(queryVector), RETRIEVAL_K);
 
         if (nearest.isEmpty()) {
@@ -62,9 +76,20 @@ public class ChatService {
                     List.of());
         }
 
-        String answer = answerGenerationService.generate(buildPrompt(nearest, question));
+        String answer = answerGenerationService.generate(buildPrompt(nearest, recentHistory, question));
         List<Citation> citations = dedupeByVideo(nearest);
         return new ChatResponse(answer, citations);
+    }
+
+    private String buildRetrievalQuery(List<HistoryTurn> recentHistory, String question) {
+        if (recentHistory.isEmpty()) {
+            return question;
+        }
+        StringBuilder combined = new StringBuilder();
+        for (HistoryTurn turn : recentHistory) {
+            combined.append(turn.question()).append(' ');
+        }
+        return combined.append(question).toString();
     }
 
     /**
@@ -92,12 +117,23 @@ public class ChatService {
         return new Citation(title, url);
     }
 
-    private String buildPrompt(List<Chunk> chunks, String question) {
+    private String buildPrompt(List<Chunk> chunks, List<HistoryTurn> recentHistory, String question) {
         StringBuilder context = new StringBuilder();
         for (Chunk chunk : chunks) {
             context.append("- [").append(sourceLabel(chunk.getSource())).append("] ")
                     .append(chunk.getText()).append('\n');
         }
+
+        StringBuilder historyBlock = new StringBuilder();
+        if (!recentHistory.isEmpty()) {
+            historyBlock.append("Earlier in this conversation:\n");
+            for (HistoryTurn turn : recentHistory) {
+                historyBlock.append("User: ").append(turn.question()).append('\n')
+                        .append("Assistant: ").append(turn.answer()).append('\n');
+            }
+            historyBlock.append('\n');
+        }
+
         return """
                 You answer questions using only the excerpts below, taken from a YouTube creator's \
                 own videos — their spoken transcript, their written video descriptions, and viewer \
@@ -107,12 +143,15 @@ public class ChatService {
                 so in plain language if you rely on one — e.g. "one viewer mentioned...". Never write \
                 the literal source labels (like "[Video transcript]") in your answer; they are for you \
                 only, not the reader. If the excerpts don't cover the question, say so plainly instead \
-                of guessing at an answer.
+                of guessing at an answer. If earlier conversation turns are provided below, use them \
+                only to understand what a follow-up question (like "give me top 5") is referring to —
+                still answer strictly from the excerpts, not from what you said earlier.
 
+                %s\
                 Excerpts:
                 %s
                 Question: %s
-                """.formatted(context, question);
+                """.formatted(historyBlock, context, question);
     }
 
     private String sourceLabel(ChunkSource source) {

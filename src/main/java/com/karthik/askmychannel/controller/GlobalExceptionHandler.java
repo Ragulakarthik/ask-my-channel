@@ -3,6 +3,7 @@ package com.karthik.askmychannel.controller;
 import com.karthik.askmychannel.client.LlmProviderException;
 import com.karthik.askmychannel.client.YoutubeClientException;
 import com.karthik.askmychannel.dto.ErrorResponse;
+import com.karthik.askmychannel.service.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -33,5 +34,10 @@ public class GlobalExceptionHandler {
         log.warn("LLM provider error", e);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(new ErrorResponse("The AI provider is temporarily unavailable, please try again shortly."));
+    }
+
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ErrorResponse> handleUnauthorized(UnauthorizedException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ErrorResponse(e.getMessage()));
     }
 }

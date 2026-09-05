@@ -36,22 +36,32 @@ Java 21 / Spring Boot 3, layered `controller → service → repository/client`.
 ```bash
 docker compose up -d                  # starts Postgres with pgvector
 
-export GEMINI_API_KEY=your-gemini-key-here
-export GROQ_API_KEY=your-groq-key-here
+export GEMINI_API_KEY=your-gemini-key-here      # or set later via the profile page
+export GROQ_API_KEY=your-groq-key-here          # or set later via the profile page
+export PROFILE_PASSPHRASE=pick-something-only-you-know
 mvn spring-boot:run
 ```
 
-Open [http://localhost:8080](http://localhost:8080), enter your channel handle
-(e.g. `@yourhandle`), click **Ingest channel**, wait for it to finish, then ask it a question.
+Open [http://localhost:8080/profile.html](http://localhost:8080/profile.html) first — enter your
+passphrase, set your channel handle and (optionally, if not already set via env vars) your API
+keys, then click **Ingest / re-ingest channel** and wait for it to finish. Then open
+[http://localhost:8080](http://localhost:8080) and ask it a question — the chat page picks up
+whichever channel is configured automatically, no restart needed.
+
+`PROFILE_PASSPHRASE` gates the profile page and ingestion — the app has no login system, so this
+is the one thing standing between a random visitor and being able to repoint your instance at a
+different channel. Leave it unset and those actions fail closed (rejected, not wide open).
 
 ### API
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/channels/{handle}/ingest` | Start ingesting a channel (returns a `jobId` immediately) |
-| `GET` | `/api/channels/{handle}/status?jobId=` | Poll ingestion progress |
-| `GET` | `/api/channels` | List ingested channels |
-| `POST` | `/api/channels/{handle}/chat` | Ask a question — `{"question": "..."}` |
+| `GET` | `/api/profile/active-channel` | Public — which channel the chat page should talk to |
+| `GET`/`POST` | `/api/profile` | Passphrase-protected — view/update channel handle + API keys |
+| `POST` | `/api/channels/{handle}/ingest` | Passphrase-protected — start ingesting a channel (returns a `jobId` immediately) |
+| `GET` | `/api/channels/{handle}/status?jobId=` | Poll ingestion progress (public) |
+| `GET` | `/api/channels` | List ingested channels (public) |
+| `POST` | `/api/channels/{handle}/chat` | Ask a question — `{"question": "...", "history": [...]}` (public) |
 
 ## Testing
 
