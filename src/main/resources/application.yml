@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: ask-my-channel
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/ask_my_channel}
+    username: ${DB_USERNAME:askmychannel}
+    password: ${DB_PASSWORD:askmychannel}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+
+askmychannel:
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    base-url: https://generativelanguage.googleapis.com/v1beta
+    embedding-model: gemini-embedding-001
+    embedding-dimensions: 768
+    generation-model: gemini-flash-latest
+  youtube:
+    yt-dlp-path: ${YT_DLP_PATH:yt-dlp}
+  ingestion:
+    chunk-window-seconds: 45
+    max-thread-pool-size: 2
+
+logging:
+  level:
+    com.karthik.askmychannel: INFO

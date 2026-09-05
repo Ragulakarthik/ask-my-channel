@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ask My Channel</title>
+<style>
+    :root { color-scheme: light dark; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 720px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        background: #fafafa;
+        color: #1a1a1a;
+    }
+    h1 { font-size: 1.4rem; }
+    .card {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.25rem;
+    }
+    label { font-size: 0.85rem; color: #555; display: block; margin-bottom: 0.3rem; }
+    input[type=text] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 0.95rem;
+    }
+    button {
+        margin-top: 0.6rem;
+        padding: 0.5rem 1rem;
+        border: none;
+        border-radius: 6px;
+        background: #1a73e8;
+        color: #fff;
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    button:disabled { background: #9db8e8; cursor: not-allowed; }
+    #ingestStatus, #chatStatus { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+    .chat-log { display: flex; flex-direction: column; gap: 0.75rem; }
+    .msg { padding: 0.6rem 0.8rem; border-radius: 8px; max-width: 90%; }
+    .msg.user { align-self: flex-end; background: #1a73e8; color: #fff; }
+    .msg.bot { align-self: flex-start; background: #f1f3f4; }
+    .citations { margin-top: 0.4rem; font-size: 0.8rem; }
+    .citations a { display: block; color: #1a73e8; text-decoration: none; }
+    .citations a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Ask My Channel</h1>
+<p style="color:#666; font-size:0.9rem;">
+    A RAG chatbot grounded in one YouTube creator's own video transcripts, with timestamped citations.
+</p>
+
+<div class="card">
+    <label for="handleInput">YouTube channel handle or URL</label>
+    <input id="handleInput" type="text" value="@karthikragula6666" placeholder="@yourhandle or https://www.youtube.com/@yourhandle">
+    <button id="ingestBtn">Ingest channel</button>
+    <div id="ingestStatus"></div>
+</div>
+
+<div class="card">
+    <div id="chatLog" class="chat-log"></div>
+    <label for="questionInput" style="margin-top:0.75rem;">Ask a question</label>
+    <input id="questionInput" type="text" placeholder="e.g. how do I prepare for interviews?">
+    <button id="askBtn">Ask</button>
+    <div id="chatStatus"></div>
+</div>
+
+<script>
+const handleInput = document.getElementById('handleInput');
+const ingestBtn = document.getElementById('ingestBtn');
+const ingestStatus = document.getElementById('ingestStatus');
+const questionInput = document.getElementById('questionInput');
+const askBtn = document.getElementById('askBtn');
+const chatStatus = document.getElementById('chatStatus');
+const chatLog = document.getElementById('chatLog');
+
+function currentHandle() {
+    return handleInput.value.trim();
+}
+
+async function pollStatus(handle, jobId) {
+    const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/status?jobId=${jobId}`);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({message: res.statusText}));
+        throw new Error(err.message);
+    }
+    return res.json();
+}
+
+ingestBtn.addEventListener('click', async () => {
+    const handle = currentHandle();
+    if (!handle) {
+        ingestStatus.textContent = 'Enter a channel handle or URL first.';
+        return;
+    }
+    ingestBtn.disabled = true;
+    ingestStatus.textContent = 'Starting ingestion…';
+
+    try {
+        const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/ingest`, {method: 'POST'});
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({message: res.statusText}));
+            throw new Error(err.message);
+        }
+        const {jobId} = await res.json();
+
+        const tick = async () => {
+            const status = await pollStatus(handle, jobId);
+            if (status.status === 'DONE') {
+                ingestStatus.textContent = `Done — ingested ${status.videosDone}/${status.videosTotal} videos.`;
+                ingestBtn.disabled = false;
+            } else if (status.status === 'FAILED') {
+                ingestStatus.textContent = `Failed: ${status.errorMessage}`;
+                ingestBtn.disabled = false;
+            } else {
+                ingestStatus.textContent = `${status.status}: ${status.videosDone}/${status.videosTotal} videos processed…`;
+                setTimeout(tick, 3000);
+            }
+        };
+        tick();
+    } catch (e) {
+        ingestStatus.textContent = `Error: ${e.message}`;
+        ingestBtn.disabled = false;
+    }
+});
+
+function appendMessage(role, text) {
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.textContent = text;
+    chatLog.appendChild(div);
+    return div;
+}
+
+askBtn.addEventListener('click', async () => {
+    const handle = currentHandle();
+    const question = questionInput.value.trim();
+    if (!handle) {
+        chatStatus.textContent = 'Enter and ingest a channel handle first.';
+        return;
+    }
+    if (!question) {
+        return;
+    }
+
+    appendMessage('user', question);
+    questionInput.value = '';
+    askBtn.disabled = true;
+    chatStatus.textContent = 'Thinking…';
+
+    try {
+        const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/chat`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({question})
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({message: res.statusText}));
+            throw new Error(err.message);
+        }
+        const data = await res.json();
+        const botMsg = appendMessage('bot', data.answer);
+
+        if (data.citations && data.citations.length > 0) {
+            const citationsDiv = document.createElement('div');
+            citationsDiv.className = 'citations';
+            data.citations.forEach(c => {
+                const a = document.createElement('a');
+                a.href = c.url;
+                a.target = '_blank';
+                a.textContent = `↳ ${c.videoTitle}`;
+                citationsDiv.appendChild(a);
+            });
+            botMsg.appendChild(citationsDiv);
+        }
+        chatStatus.textContent = '';
+    } catch (e) {
+        chatStatus.textContent = `Error: ${e.message}`;
+    } finally {
+        askBtn.disabled = false;
+    }
+});
+
+questionInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        askBtn.click();
+    }
+});
+</script>
+</body>
+</html>
