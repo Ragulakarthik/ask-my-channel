@@ -1,6 +1,7 @@
 package com.karthik.askmychannel.repository;
 
 import com.karthik.askmychannel.entity.Chunk;
+import com.karthik.askmychannel.entity.ChunkSource;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -10,6 +11,8 @@ import java.util.List;
 public interface ChunkRepository extends JpaRepository<Chunk, Long> {
 
     boolean existsByVideoId(String videoId);
+
+    boolean existsByVideoIdAndSource(String videoId, ChunkSource source);
 
     /**
      * Cosine-distance nearest-neighbour search (pgvector's "<=>" operator), scoped to one

@@ -92,9 +92,11 @@ public class IngestionWorker {
 
         // Re-running ingestion on a channel (e.g. to pick up videos skipped by a transient
         // YouTube rate limit last time) must not re-embed and duplicate chunks for videos that
-        // already succeeded — this also makes a re-run cheap and fast for anything already done.
-        if (chunkRepository.existsByVideoId(video.videoId())) {
-            log.debug("Video {} already has chunks, skipping re-ingestion", video.videoId());
+        // already succeeded. A video only counts as done once it has a TRANSCRIPT chunk —
+        // description/comment chunks alone mean a prior run's caption fetch failed, so those
+        // videos are retried rather than treated as finished.
+        if (chunkRepository.existsByVideoIdAndSource(video.videoId(), ChunkSource.TRANSCRIPT)) {
+            log.debug("Video {} already has a transcript, skipping re-ingestion", video.videoId());
             return;
         }
 
@@ -107,12 +109,15 @@ public class IngestionWorker {
             }
         }
 
-        if (content.description() != null && !content.description().isBlank()) {
+        if (content.description() != null && !content.description().isBlank()
+                && !chunkRepository.existsByVideoIdAndSource(video.videoId(), ChunkSource.DESCRIPTION)) {
             saveChunk(channelId, video.videoId(), content.description(), 0, ChunkSource.DESCRIPTION);
         }
 
-        for (String comment : content.topComments()) {
-            saveChunk(channelId, video.videoId(), comment, 0, ChunkSource.COMMENT);
+        if (!chunkRepository.existsByVideoIdAndSource(video.videoId(), ChunkSource.COMMENT)) {
+            for (String comment : content.topComments()) {
+                saveChunk(channelId, video.videoId(), comment, 0, ChunkSource.COMMENT);
+            }
         }
     }
 

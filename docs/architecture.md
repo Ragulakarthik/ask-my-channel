@@ -110,7 +110,18 @@ PostgreSQL + pgvector (Docker Compose)
     beats none). The frontend consumes this via `fetch()` + `response.body.getReader()` rather
     than the native `EventSource` API, since `EventSource` only supports `GET` with no request
     body — not viable here given the request needs a JSON body (question + history).
-13. **`docker-compose.yml` runs the whole stack**, not just Postgres — an `app` service builds
+13. **Up to 3 follow-up suggestions, generated in the same LLM call as the answer** rather than
+    a second call — `ChatService.buildPrompt()` asks the model to append a fixed marker
+    (`===SUGGESTED_FOLLOWUPS===`) followed by up to 3 `- question` lines after its answer.
+    `ChatService.splitSuggestions()` parses this out for the non-streaming `/chat` endpoint
+    (`ChatResponse.suggestedQuestions()`). The streaming `/chat/stream` endpoint forwards raw
+    tokens unchanged — the frontend (`index.html`) detects the marker itself as tokens arrive,
+    holding back the last `marker.length - 1` characters from rendering (since Groq/Gemini
+    routinely split the marker across several separate token frames) until it's confirmed
+    absent or found, so a partial marker never flashes as visible text. If the model omits the
+    marker, everything is treated as answer text with no suggestions — matches the existing
+    "never invent an unanswerable question" grounding rule applied to citations.
+14. **`docker-compose.yml` runs the whole stack**, not just Postgres — an `app` service builds
     from the repo's own multi-stage `Dockerfile` (JRE + `yt-dlp` bundled) and depends on
     `postgres` via a `pg_isready` healthcheck, so `docker compose up -d --build` is the entire
     "clone this repo" story with zero local Java/Maven/`yt-dlp` install required. Running the app

@@ -129,6 +129,8 @@ body{
     cursor:pointer;transition:all .18s ease;
 }
 .suggestion-pill:hover{border-color:var(--accent-1);color:var(--text);background:var(--surface-2);transform:translateY(-1px);}
+.followup-pills{display:flex;flex-wrap:wrap;gap:0.5rem;}
+.followup-pills .suggestion-pill{padding:0.42rem 0.85rem;font-size:0.75rem;}
 
 .msg-row{display:flex;gap:0.65rem;align-items:flex-start;animation:fadeUp .35s cubic-bezier(.2,.7,.3,1) both;}
 .msg-row.user{flex-direction:row-reverse;}
@@ -143,10 +145,12 @@ body{
 .avatar.bot{background:var(--accent-grad);color:#fff;}
 .avatar.user{background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border);}
 
+.bot-content{display:flex;flex-direction:column;gap:0.55rem;max-width:76%;min-width:0;}
 .bubble{
-    max-width:76%;padding:0.75rem 1rem;border-radius:var(--radius-md);
+    padding:0.75rem 1rem;border-radius:var(--radius-md);
     font-size:0.9rem;line-height:1.55;
 }
+.msg-row.user .bubble{max-width:76%;}
 .msg-row.user .bubble{
     background:var(--accent-grad);color:#fff;border-bottom-right-radius:4px;
     box-shadow:0 6px 20px rgba(124,111,238,0.28);
@@ -237,15 +241,6 @@ body{
 .send-btn.stop-mode{background:var(--danger);}
 
 button.icon-link{cursor:pointer;font:inherit;}
-.new-chat-btn{
-    display:flex;align-items:center;gap:0.4rem;flex-shrink:0;white-space:nowrap;
-    background:var(--surface);border:1px solid var(--border);color:var(--text-dim);
-    border-radius:999px;padding:0.45rem 0.9rem 0.45rem 0.7rem;
-    font-size:0.78rem;font-weight:500;font-family:var(--font-body);
-    cursor:pointer;transition:all .18s ease;
-}
-.new-chat-btn:hover{border-color:var(--border-strong);color:var(--text);background:var(--surface-2);}
-.new-chat-btn svg{width:14px;height:14px;flex-shrink:0;}
 .chat-status{font-size:0.72rem;color:var(--danger);text-align:center;margin-top:0.5rem;min-height:1em;}
 
 /* ---------- cursor glow ---------- */
@@ -296,9 +291,8 @@ button.icon-link{cursor:pointer;font:inherit;}
                 <span class="status-dot" id="statusDot"></span>
                 <span class="channel-label" id="channelLabel">Loading…</span>
             </div>
-            <button class="new-chat-btn" id="newChatBtn" type="button" title="Start a new chat">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-                <span>New Chat</span>
+            <button class="icon-link" id="newChatBtn" type="button" title="Start a new chat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
             </button>
             <a class="icon-link" href="profile.html" title="Profile settings">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -360,7 +354,7 @@ function loadChatState(){
         if (!Array.isArray(turns) || turns.length === 0) return;
         turns.forEach(t => {
             appendUserMessage(t.question);
-            renderBotBubbleContent(appendBotRow(), t.answer, t.citations);
+            renderBotBubbleContent(appendBotRow(), t.answer, t.citations, t.suggestedQuestions);
         });
         chatTurns = turns;
         scrollToBottom();
@@ -414,7 +408,7 @@ function appendUserMessage(text){
 function appendBotThinking(){
     const row = document.createElement('div');
     row.className = 'msg-row bot';
-    row.innerHTML = `<div class="avatar bot">AI</div><div class="bubble"><div class="thinking-dots"><span></span><span></span><span></span></div></div>`;
+    row.innerHTML = `<div class="avatar bot">AI</div><div class="bot-content"><div class="bubble"><div class="thinking-dots"><span></span><span></span><span></span></div></div></div>`;
     chatLog.appendChild(row);
     scrollToBottom();
     return row;
@@ -423,15 +417,33 @@ function appendBotThinking(){
 function appendBotRow(){
     const row = document.createElement('div');
     row.className = 'msg-row bot';
-    row.innerHTML = `<div class="avatar bot">AI</div><div class="bubble"></div>`;
+    row.innerHTML = `<div class="avatar bot">AI</div><div class="bot-content"><div class="bubble"></div></div>`;
     chatLog.appendChild(row);
     return row.querySelector('.bubble');
 }
 
-function renderBotBubbleContent(bubble, answer, citations){
+function renderBotBubbleContent(bubble, answer, citations, suggestedQuestions){
     bubble.innerHTML = renderMarkdown(answer);
     appendCitations(bubble, citations);
     appendMessageActions(bubble, answer);
+    // Follow-up pills sit below the bubble, outside its bordered box — they're an invitation to
+    // ask something else, not part of the grounded answer itself.
+    appendFollowUpSuggestions(bubble.parentElement, suggestedQuestions);
+}
+
+function appendFollowUpSuggestions(container, suggestedQuestions){
+    if (!suggestedQuestions || suggestedQuestions.length === 0) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'followup-pills';
+    suggestedQuestions.slice(0, 3).forEach(q => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'suggestion-pill';
+        btn.textContent = q;
+        btn.addEventListener('click', () => { if (!isStreaming) ask(q); });
+        wrap.appendChild(btn);
+    });
+    container.appendChild(wrap);
 }
 
 function appendCitations(bubble, citations){
@@ -544,9 +556,11 @@ async function ask(question){
 
     let fullAnswer = '';
     let citations = [];
+    let suggestedQuestions = [];
     let firstToken = true;
     let aborted = false;
     let errored = false;
+    let serverErrorMessage = null;
 
     try {
         const res = await fetch(`/api/channels/${encodeURIComponent(handle)}/chat/stream`, {
@@ -567,8 +581,16 @@ async function ask(question){
             buffer += decoder.decode(value, {stream: true});
             buffer = consumeSseFrames(buffer, (eventName, data) => {
                 if (eventName === 'citations') {
+                    // Arrives last, right before the stream closes — the server only knows
+                    // whether the answer was actually grounded once generation has finished.
                     citations = JSON.parse(data);
+                } else if (eventName === 'suggestions') {
+                    suggestedQuestions = JSON.parse(data);
+                } else if (eventName === 'error') {
+                    serverErrorMessage = JSON.parse(data);
                 } else if (eventName === 'token') {
+                    // The server (AnswerStreamParser) has already stripped any markers — tokens
+                    // here are always clean, reader-facing text.
                     if (firstToken) { firstToken = false; bubble.innerHTML = ''; }
                     fullAnswer += JSON.parse(data);
                     bubble.innerHTML = renderMarkdown(fullAnswer);
@@ -590,10 +612,19 @@ async function ask(question){
         setComposerStreaming(false);
     }
 
+    if (serverErrorMessage && firstToken) {
+        // The server hit an error (e.g. both LLM providers down) before any content streamed —
+        // same clean "no bubble, just a status line" treatment as a network-level failure.
+        errored = true;
+        thinkingRow.remove();
+        chatStatus.textContent = serverErrorMessage;
+    }
+
     if (!errored && !firstToken) {
         if (aborted) fullAnswer += '\n\n*(stopped)*';
-        renderBotBubbleContent(bubble, fullAnswer, citations);
-        chatTurns.push({question, answer: fullAnswer, citations});
+        else if (serverErrorMessage) fullAnswer += '\n\n*(interrupted: ' + serverErrorMessage + ')*';
+        renderBotBubbleContent(bubble, fullAnswer, citations, suggestedQuestions);
+        chatTurns.push({question, answer: fullAnswer, citations, suggestedQuestions});
         saveChatState();
         setStatusDot('ready');
     }

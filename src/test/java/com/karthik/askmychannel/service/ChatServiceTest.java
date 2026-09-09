@@ -3,6 +3,7 @@ package com.karthik.askmychannel.service;
 import com.karthik.askmychannel.client.GeminiClient;
 import com.karthik.askmychannel.dto.ChatResponse;
 import com.karthik.askmychannel.dto.HistoryTurn;
+import com.karthik.askmychannel.entity.Channel;
 import com.karthik.askmychannel.entity.Chunk;
 import com.karthik.askmychannel.entity.ChunkSource;
 import com.karthik.askmychannel.entity.Video;
@@ -177,7 +178,68 @@ class ChatServiceTest {
         String prompt = promptCaptor.getValue();
         assertThat(prompt).contains("User: what comment repeated the most?");
         assertThat(prompt).contains("Assistant: \"Will make video on it\" appeared twice.");
-        assertThat(prompt).contains("Question: give me top 5");
+        assertThat(prompt).contains("Visitor's question: give me top 5");
+    }
+
+    @Test
+    void stripsTheUngroundedMarkerAndWithholdsCitationsWhenTheModelJudgesTheExcerptsIrrelevant() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+
+        // Retrieval still runs and finds a chunk (pgvector always returns its nearest neighbours
+        // regardless of true relevance) — but the model itself decides, via the marker, that it
+        // doesn't actually help answer "hi", so citations must be withheld despite a chunk existing.
+        Chunk chunk = new Chunk("chan-1", "vid-1", "some excerpt", 0.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f});
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of(chunk));
+        when(channelRepository.findById("chan-1")).thenReturn(Optional.of(new Channel("chan-1", "@karthik", "Karthik Ragula")));
+        when(answerGenerationService.generate(anyString())).thenReturn(
+                "===UNGROUNDED===\nHi, I'm Karthik Ragula's agent — nice to meet you! What would you like to know?");
+
+        ChatResponse response = chatService().ask("chan-1", "hi", List.of());
+
+        assertThat(response.citations()).isEmpty();
+        assertThat(response.answer())
+                .isEqualTo("Hi, I'm Karthik Ragula's agent — nice to meet you! What would you like to know?")
+                .doesNotContain("===UNGROUNDED===");
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(answerGenerationService).generate(promptCaptor.capture());
+        assertThat(promptCaptor.getValue()).contains("Karthik Ragula").contains("Visitor's question: hi");
+    }
+
+    @Test
+    void keepsCitationsWhenTheModelDoesNotSignalTheAnswerAsUngrounded() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+
+        Chunk chunk = new Chunk("chan-1", "vid-1", "prepare DSA daily", 0.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f});
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of(chunk));
+        when(videoRepository.findById("vid-1")).thenReturn(Optional.of(new Video("vid-1", "chan-1", "Interview Prep", null, 600)));
+        when(channelRepository.findById("chan-1")).thenReturn(Optional.of(new Channel("chan-1", "@karthik", "Karthik Ragula")));
+        when(answerGenerationService.generate(anyString())).thenReturn("Prepare DSA daily and do mock interviews.");
+
+        ChatResponse response = chatService().ask("chan-1", "how to prepare for interviews?", List.of());
+
+        assertThat(response.citations()).hasSize(1);
+        assertThat(response.answer()).isEqualTo("Prepare DSA daily and do mock interviews.");
+    }
+
+    @Test
+    void splitsSuggestedFollowUpsOffTheMarkerAndStripsThemFromTheAnswer() {
+        when(channelRepository.existsById("chan-1")).thenReturn(true);
+        when(geminiClient.embed(anyString())).thenReturn(new float[]{0.1f, 0.2f});
+
+        Chunk chunk = new Chunk("chan-1", "vid-1", "some excerpt", 0.0, ChunkSource.TRANSCRIPT, new float[]{0.1f, 0.2f});
+        when(chunkRepository.findNearest(anyString(), anyString(), anyInt())).thenReturn(List.of(chunk));
+        when(videoRepository.findById("vid-1")).thenReturn(Optional.of(new Video("vid-1", "chan-1", "Some Video", null, 600)));
+        when(answerGenerationService.generate(anyString())).thenReturn(
+                "Prepare DSA daily.\n===SUGGESTED_FOLLOWUPS===\n- What topics come up most?\n- How long should I practice?\n");
+
+        ChatResponse response = chatService().ask("chan-1", "how to prepare?", List.of());
+
+        assertThat(response.answer()).isEqualTo("Prepare DSA daily.\n");
+        assertThat(response.suggestedQuestions()).containsExactly(
+                "What topics come up most?", "How long should I practice?");
     }
 
     @Test
