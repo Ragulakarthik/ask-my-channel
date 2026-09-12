@@ -302,6 +302,24 @@ public class YoutubeClient {
                             + "Install with: pip install -U yt-dlp", e);
         }
 
+        // Drained on a separate thread, concurrently with stdout below: if stderr's pipe buffer
+        // fills while we're blocked reading stdout (or vice versa), the process can hang forever
+        // waiting for someone to drain the other stream.
+        List<String> errorLines = new ArrayList<>();
+        Thread stderrDrain = new Thread(() -> {
+            try (BufferedReader stderr = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = stderr.readLine()) != null) {
+                    errorLines.add(line);
+                }
+            } catch (IOException ignored) {
+                // stream closed when the process exits
+            }
+        }, "yt-dlp-stderr");
+        stderrDrain.setDaemon(true);
+        stderrDrain.start();
+
         List<String> outputLines = new ArrayList<>();
         try (BufferedReader stdout = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
@@ -325,8 +343,14 @@ public class YoutubeClient {
             process.destroyForcibly();
             throw new YoutubeClientException("yt-dlp timed out after " + PROCESS_TIMEOUT);
         }
+        try {
+            stderrDrain.join(Duration.ofSeconds(5).toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         if (process.exitValue() != 0 && outputLines.isEmpty()) {
-            throw new YoutubeClientException("yt-dlp exited with code " + process.exitValue() + " and produced no output");
+            throw new YoutubeClientException("yt-dlp exited with code " + process.exitValue()
+                    + " and produced no output. stderr: " + String.join(" | ", errorLines));
         }
         return outputLines;
     }
