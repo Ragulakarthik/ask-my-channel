@@ -1,0 +1,39 @@
+databases:
+  - name: ask-my-channel-db
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: ask-my-channel
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: PGHOST
+        fromDatabase:
+          name: ask-my-channel-db
+          property: host
+      - key: PGPORT
+        fromDatabase:
+          name: ask-my-channel-db
+          property: port
+      - key: PGDATABASE
+        fromDatabase:
+          name: ask-my-channel-db
+          property: database
+      - key: PGUSER
+        fromDatabase:
+          name: ask-my-channel-db
+          property: user
+      - key: PGPASSWORD
+        fromDatabase:
+          name: ask-my-channel-db
+          property: password
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: PROFILE_PASSPHRASE
+        sync: false
