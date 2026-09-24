@@ -65,6 +65,46 @@ whichever channel is configured automatically, no restart needed.
 is the one thing standing between a random visitor and being able to repoint your instance at a
 different channel. Leave it unset and those actions fail closed (rejected, not wide open).
 
+## Deploy (Render + Neon)
+
+Live instance: [ask-my-channel.onrender.com](https://ask-my-channel.onrender.com)
+
+[`render.yaml`](render.yaml) defines the web service (Docker, free plan). Postgres is hosted
+externally rather than on Render, because Render deletes free databases after 30 days —
+[Neon](https://neon.tech)'s free tier doesn't expire and ships pgvector. Set these on the Render
+service (the Flyway migrations create the schema and enable pgvector on first start):
+
+| Variable | Value |
+|---|---|
+| `DB_URL` | `jdbc:postgresql://<neon-host>/<db>?sslmode=require` |
+| `DB_USERNAME` / `DB_PASSWORD` | From Neon's connection details |
+| `GEMINI_API_KEY` / `GROQ_API_KEY` | Your keys (or set them later via the profile page) |
+| `PROFILE_PASSPHRASE` | Something only you know |
+
+**Ingest from your own machine, not from the hosted instance.** YouTube blocks requests from
+cloud IP ranges (`HTTP 429` / "Sign in to confirm you're not a bot"), so an ingest started on
+Render finishes with every video skipped. Only ingestion talks to YouTube — chat needs just the
+database and the LLM APIs — so run the app locally against the same hosted database, ingest
+once, and the hosted instance serves questions from it:
+
+```bash
+docker build -t ask-my-channel .
+docker run --rm -p 8081:8080 \
+  -e DB_URL='jdbc:postgresql://<neon-host>/<db>?sslmode=require' \
+  -e DB_USERNAME=... -e DB_PASSWORD=... \
+  -e GEMINI_API_KEY=... -e GROQ_API_KEY=... -e PROFILE_PASSPHRASE=... \
+  ask-my-channel
+```
+
+Then open [http://localhost:8081/profile.html](http://localhost:8081/profile.html) and click
+**Ingest / re-ingest channel**. Re-run it after uploading new videos, or to retry videos whose
+captions hit a YouTube rate limit — anything that already has a transcript is skipped.
+
+Render's free web services sleep after 15 minutes idle and take a couple of minutes to wake. An
+external uptime ping (e.g. UptimeRobot every 5 minutes) keeps it warm — point it at `/`, not
+`/actuator/health`, since the health check queries the database and would keep Neon's compute
+awake around the clock.
+
 ### API
 
 | Method | Path | Purpose |
@@ -106,5 +146,7 @@ mvn test
   which doesn't include per-video timestamps)
 - Fetching comments makes ingestion slower and adds another YouTube-side request per video —
   worth watching if it ever contributes to rate-limiting on a very large channel
+- A video that fails to fetch is logged and skipped, and the job still reports `DONE` — check
+  the logs (`Skipping video`, `Transcript fetch failed`) if answers come back empty
 - Planned stretch goals: a React frontend, an agentic "study path" planner across videos, and
   exposing the chat query as an MCP tool
