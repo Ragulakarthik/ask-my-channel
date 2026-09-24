@@ -1,8 +1,6 @@
-databases:
-  - name: ask-my-channel-db
-    plan: free
-    postgresMajorVersion: "16"
-
+# Postgres is hosted externally (e.g. Neon's free tier, which doesn't expire) rather than on
+# Render, whose free databases are deleted after 30 days. Set DB_URL to a JDBC URL with
+# sslmode=require, e.g. jdbc:postgresql://<host>/<db>?sslmode=require
 services:
   - type: web
     name: ask-my-channel
@@ -11,26 +9,12 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /actuator/health
     envVars:
-      - key: PGHOST
-        fromDatabase:
-          name: ask-my-channel-db
-          property: host
-      - key: PGPORT
-        fromDatabase:
-          name: ask-my-channel-db
-          property: port
-      - key: PGDATABASE
-        fromDatabase:
-          name: ask-my-channel-db
-          property: database
-      - key: PGUSER
-        fromDatabase:
-          name: ask-my-channel-db
-          property: user
-      - key: PGPASSWORD
-        fromDatabase:
-          name: ask-my-channel-db
-          property: password
+      - key: DB_URL
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY
